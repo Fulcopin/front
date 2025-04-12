@@ -1,0 +1,15 @@
+2025/04/03-21:36:17.859 5078 Reusing MANIFEST C:\Users\fupifigu\AppData\Local\Temp\flutter_tools.cfd0ad9a\flutter_tools_chrome_device.a41095c4\Default\IndexedDB\https_www.youtube.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/04/03-21:36:17.859 5078 Recovering log #3
+2025/04/03-21:36:17.865 5078 Reusing old log C:\Users\fupifigu\AppData\Local\Temp\flutter_tools.cfd0ad9a\flutter_tools_chrome_device.a41095c4\Default\IndexedDB\https_www.youtube.com_0.indexeddb.leveldb/000003.log 
+2025/04/03-21:36:37.092 214c Level-0 table #5: started
+2025/04/03-21:36:37.101 214c Level-0 table #5: 1118675 bytes OK
+2025/04/03-21:36:37.103 214c Delete type=0 #3
+2025/04/03-21:41:43.372 214c Level-0 table #7: started
+2025/04/03-21:41:43.382 214c Level-0 table #7: 1030325 bytes OK
+2025/04/03-21:41:43.385 214c Delete type=0 #4
+2025/04/03-21:41:45.373 39ac Compacting 1@1 + 1@2 files
+2025/04/03-21:41:45.379 39ac Generated table #8@1: 460 keys, 33844 bytes
+2025/04/03-21:41:45.379 39ac Compacted 1@1 + 1@2 files => 33844 bytes
+2025/04/03-21:41:45.381 39ac compacted to: files[ 0 0 1 0 0 0 0 ]
+2025/04/03-21:41:45.382 39ac Delete type=2 #5
+2025/04/03-21:41:45.382 39ac Delete type=2 #7

@@ -97,6 +97,7 @@ Future<void> _loadProducts() async {
     });
   }
 
+
   Future<void> _deleteProduct(String id) async {
     // Mostrar diálogo de confirmación
     final confirm = await showDialog<bool>(

@@ -4,7 +4,8 @@ import '../theme.dart';
 import '../services/auth_service.dart';
 import '../services/shipment_service.dart';
 import '../widgets/shipment_tracking_timeline.dart';
-
+import 'dart:convert';
+import '../models/shipement_model.dart';
 class MyShipmentsScreen extends StatefulWidget {
   const MyShipmentsScreen({Key? key}) : super(key: key);
 
@@ -23,31 +24,206 @@ class _MyShipmentsScreenState extends State<MyShipmentsScreen> {
     super.initState();
     _loadShipments();
   }
-
-  Future<void> _loadShipments() async {
-    setState(() {
-      _isLoading = true;
-    });
-    
-    try {
-      final shipments = await _shipmentService.getShipments();
-      setState(() {
-        _shipments = shipments;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error al cargar envíos: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+String _getStatusString(String backendStatus) {
+    switch (backendStatus.toLowerCase()) {
+      case 'en proceso':
+      case 'procesando':
+        return 'processing';
+      case 'enviado':
+      case 'en tránsito':
+        return 'shipped';
+      case 'en destino':
+      case 'llegó a destino':
+        return 'outForDelivery';
+      case 'entregado':
+      case 'completado':
+        return 'delivered';
+      default:
+        return 'processing';
     }
   }
+  // Replace the "detalle" line with a method that shows shipping information
+void showShippingDetails(Shipment shipment) {
+  showDialog(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: Text('Detalles del Envío'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildDetailRow('Número de seguimiento:', shipment.trackingNumber),
+              _buildDetailRow('Estado:', shipment.status),
+              _buildDetailRow('Fecha de envío:', shipment.shippingDate),
+              _buildDetailRow('Fecha estimada de entrega:', shipment.estimatedDeliveryDate),
+              _buildDetailRow('Dirección de entrega:', shipment.deliveryAddress),
+              _buildDetailRow('Método de envío:', shipment.shippingMethod),
+              _buildDetailRow('Compañía de transporte:', shipment.carrier),
+              Divider(),
+              Text('Productos:', style: TextStyle(fontWeight: FontWeight.bold)),
+              ...shipment.products.map((product) => 
+                Padding(
+                  padding: EdgeInsets.only(left: 8.0, top: 4.0),
+                  child: Text('• ${product.name} (${product.quantity}x)'),
+                )
+              ).toList(),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text('Cerrar'),
+          ),
+        ],
+      );
+    },
+  );
+}
 
+Widget _buildDetailRow(String label, String value) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 8.0),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: TextStyle(fontWeight: FontWeight.bold)),
+        SizedBox(width: 4),
+        Expanded(child: Text(value)),
+      ],
+    ),
+  );
+}
+  ShipmentStatus _convertStringToShipmentStatus(String status) {
+  switch (status.toLowerCase()) {
+    case 'en proceso':
+    case 'procesando':
+      return ShipmentStatus.enBodega;
+    case 'enviado':
+    case 'en tránsito':
+      return ShipmentStatus.enRutaAeropuerto;
+    case 'en aduana':
+      return ShipmentStatus.enAduana;
+    case 'en destino':
+    case 'llegó a destino':
+      return ShipmentStatus.enPais;
+    case 'en ruta entrega':
+    case 'en ruta final':
+      return ShipmentStatus.enRutaEntrega;
+    case 'entregado':
+    case 'completado':
+      return ShipmentStatus.entregado;
+    default:
+      return ShipmentStatus.enBodega;
+  }
+}
+ Future<void> _loadShipments() async {
+  setState(() {
+    _isLoading = true;
+  });
+  
+  try {
+    // Obtener los envíos del servicio
+    final shipments = await _shipmentService.getShipments();
+    
+    // Procesar los envíos para manejar correctamente los tipos
+    final processedShipments = shipments.map((shipment) {
+      // Esta función asegura que los valores sean strings
+      String ensureString(dynamic value, String defaultValue) {
+        if (value == null) return defaultValue;
+        if (value is String) return value;
+        if (value is Map || value is List) return json.encode(value);
+        return value.toString();
+      }
+      
+      // Usar el mismo mapeo que ya tienes, pero con seguridad de tipos
+      return {
+        'id': ensureString(shipment['id'], ''),
+        'trackingNumber': ensureString(shipment['trackingNumber'], 'Sin número'),
+        'status': ensureString(shipment['status'], 'Procesando'),
+        'origin': ensureString(shipment['origin'], 'Miami, FL'),
+        'destination': ensureString(shipment['destination'], 'No disponible'),
+        'date': ensureString(shipment['date'], 'Fecha no disponible'),
+        'currentStatus': shipment['currentStatus'],  // Mantener como está para la línea de tiempo
+      };
+    }).toList();
+    
+    setState(() {
+      _shipments = processedShipments;
+      _isLoading = false;
+    });
+  } catch (e) {
+    print('Error al cargar envíos: $e');
+    setState(() {
+      _isLoading = false;
+    });
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error al cargar envíos: $e'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+}
+
+
+// 3. Implementa el método _buildStatusBadge
+Widget _buildStatusBadge(String status) {
+  Color badgeColor;
+  IconData badgeIcon;
+  
+  switch (status.toLowerCase()) {
+    case 'en proceso':
+    case 'procesando':
+      badgeColor = Colors.blue;
+      badgeIcon = Icons.inventory_2_outlined;
+      break;
+    case 'enviado':
+    case 'en tránsito':
+      badgeColor = Colors.orange;
+      badgeIcon = Icons.local_shipping_outlined;
+      break;
+    case 'en destino':
+    case 'llegó a destino':
+      badgeColor = Colors.purple;
+      badgeIcon = Icons.home_outlined;
+      break;
+    case 'entregado':
+    case 'completado':
+      badgeColor = Colors.green;
+      badgeIcon = Icons.check_circle_outline;
+      break;
+    default:
+      badgeColor = Colors.grey;
+      badgeIcon = Icons.help_outline;
+  }
+  
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    decoration: BoxDecoration(
+      color: badgeColor.withOpacity(0.2),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: badgeColor),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(badgeIcon, size: 16, color: badgeColor),
+        const SizedBox(width: 4),
+        Text(
+          status,
+          style: TextStyle(
+            color: badgeColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    ),
+  );
+}
   void _showCreateShipmentModal() {
     showModalBottomSheet(
       context: context,
@@ -372,25 +548,26 @@ class _MyShipmentsScreenState extends State<MyShipmentsScreen> {
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text(
-                                    shipment['trackingNumber'],
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                                    shipment['trackingNumber']?.toString() ?? 'Sin número',
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
                                   ),
-                                  _buildStatusBadge(shipment['status']),
+                                ),
+                                   _buildStatusBadge(shipment['status']?.toString() ?? ''),
                                 ],
                               ),
                             ),
                             
                             // Barra de progreso
                             Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: ShipmentTrackingTimeline(
-                                currentStatus: shipment['currentStatus'],
-                                showLabels: false,
-                              ),
-                            ),
+                            padding: const EdgeInsets.all(16),
+                            child: ShipmentTrackingTimeline(
+                            currentStatus: _convertStringToShipmentStatus(shipment['status']?.toString() ?? ''),
+                            showLabels: true,
+                            isHorizontal: true,
+                          ),
+                        ),
                             
                             // Detalles del envío
                             Padding(
@@ -409,9 +586,9 @@ class _MyShipmentsScreenState extends State<MyShipmentsScreen> {
                                           ),
                                         ),
                                         Text(
-                                          shipment['origin'],
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
+                                          shipment['origin']?.toString() ?? 'No disponible',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
                                           ),
                                         ),
                                       ],
@@ -433,9 +610,9 @@ class _MyShipmentsScreenState extends State<MyShipmentsScreen> {
                                           ),
                                         ),
                                         Text(
-                                          shipment['destination'],
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
+                                         shipment['destination']?.toString() ?? 'No disponible',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
                                           ),
                                         ),
                                       ],
@@ -453,9 +630,9 @@ class _MyShipmentsScreenState extends State<MyShipmentsScreen> {
                                           ),
                                         ),
                                         Text(
-                                          shipment['date'],
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
+                                         shipment['date']?.toString() ?? 'No disponible',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
                                           ),
                                         ),
                                       ],
@@ -503,42 +680,83 @@ class _MyShipmentsScreenState extends State<MyShipmentsScreen> {
       ),
     );
   }
-
-  Widget _buildStatusBadge(String status) {
-    Color color;
-    switch (status) {
-      case 'Entregado':
-        color = Colors.green;
-        break;
-      case 'En tránsito':
-        color = AppTheme.primaryColor;
-        break;
-      case 'Procesando':
-        color = Colors.orange;
-        break;
-      case 'Retrasado':
-        color = Colors.red;
-        break;
-      default:
-        color = AppTheme.mutedTextColor;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color),
-      ),
-      child: Text(
-        status,
-        style: TextStyle(
-          color: color,
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
+  
+int _getStatusLevel(String status) {
+  switch (status.toLowerCase()) {
+    case 'en proceso':
+    case 'procesando':
+      return 0;
+    case 'enviado':
+    case 'en tránsito':
+      return 1;
+    case 'en destino':
+    case 'llegó a destino':
+      return 2;
+    case 'entregado':
+    case 'completado':
+      return 3;
+    default:
+      return 0;
   }
+}
+Widget _buildSimpleTrackingTimeline(int currentStep) {
+  return Container(
+    height: 70,
+    child: Row(
+      children: [
+        _buildTimelineStep(0, currentStep, 'Procesando'),
+        _buildTimelineConnector(0 < currentStep),
+        _buildTimelineStep(1, currentStep, 'Enviado'),
+        _buildTimelineConnector(1 < currentStep),
+        _buildTimelineStep(2, currentStep, 'En destino'),
+        _buildTimelineConnector(2 < currentStep),
+        _buildTimelineStep(3, currentStep, 'Entregado'),
+      ],
+    ),
+  );
+}
+Widget _buildTimelineStep(int step, int currentStep, String label) {
+  final isActive = step <= currentStep;
+  final color = isActive ? Colors.green : Colors.grey;
+  
+  return Expanded(
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: isActive ? color : Colors.white,
+            shape: BoxShape.circle,
+            border: Border.all(color: color),
+          ),
+          child: Icon(
+            step == currentStep ? Icons.location_on : Icons.check,
+            color: step == currentStep ? Colors.white : color,
+            size: 16,
+          ),
+        ),
+        SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: isActive ? Colors.black : Colors.grey,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    ),
+  );
+}
+Widget _buildTimelineConnector(bool isActive) {
+  return Container(
+    width: 20,
+    height: 2,
+    color: isActive ? Colors.green : Colors.grey,
+  );
+}
+
 }
 

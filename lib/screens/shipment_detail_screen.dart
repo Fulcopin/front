@@ -6,747 +6,816 @@ import '../services/auth_service.dart';
 import '../services/shipment_service.dart';
 import '../widgets/shipment_tracking_timeline.dart';
 import '../models/tracking_event_model.dart';
+import 'package:flutter/material.dart';
+import '../theme.dart';
+import '../services/shipment_service.dart';
+import '../widgets/shipment_tracking_timeline.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'dart:convert';
+import 'dart:math';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../theme.dart';
+import '../services/shipment_service.dart';
+import '../widgets/shipment_tracking_timeline.dart';
 class ShipmentDetailScreen extends StatefulWidget {
-  final String shipmentId;
-
-  const ShipmentDetailScreen({
-    Key? key,
-    required this.shipmentId,
-  }) : super(key: key);
-
+    final String shipmentId;
+    const ShipmentDetailScreen({Key? key, required this.shipmentId}) : super(key: key);
+  
   @override
   State<ShipmentDetailScreen> createState() => _ShipmentDetailScreenState();
 }
 
-class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> with SingleTickerProviderStateMixin {
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  bool _isLoading = true;
-  Map<String, dynamic>? _shipment;
-  List<TrackingEvent> _trackingEvents = [];
+class _ShipmentDetailScreenState extends State<ShipmentDetailScreen> {
   final ShipmentService _shipmentService = ShipmentService();
-  
-  late TabController _tabController;
-  bool _isAdmin = false;
+  bool _isLoading = true;
+  Map<String, dynamic> _shipmentDetails = {};
+  String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-    _loadShipmentDetails();
+    // Fetch details is called after the widget is inserted in the tree
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchShipmentDetails();
+    });
   }
+
+Future<void> _fetchShipmentDetails() async {
+  setState(() {
+    _isLoading = true;
+    _errorMessage = null;
+  });
+
+  try {
+    // Get token from secure storage
+    const storage = FlutterSecureStorage();
+    final token = await storage.read(key: 'token');
+    
+    if (token == null) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'No se encontró token de autenticación';
+      });
+      return;
+    }
+    
+    print('Fetching details for shipment: ${widget.shipmentId}');
+    
+    final details = await _shipmentService.getShipmentDetails(
+      shipmentId: widget.shipmentId,
+      token: token,
+    );
+    
+    print('Received data from API: ${details.keys.join(", ")}');
+    
+    // The response is already normalized to match the frontend field names
+    setState(() {
+      _shipmentDetails = details;
+      _isLoading = false;
+    });
+  } catch (e) {
+    print('Error fetching shipment details: $e');
+    setState(() {
+      _isLoading = false;
+      _errorMessage = 'Error al cargar detalles: $e';
+    });
+  }
+}
+// Helper method to format dates
+String _formatDate(dynamic date) {
+  if (date == null) return 'No disponible';
   
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadShipmentDetails() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    try {
-      final shipment = await _shipmentService.getShipmentById(widget.shipmentId);
-      final events = await _shipmentService.getTrackingEvents(widget.shipmentId);
-      
-      setState(() {
-        _shipment = shipment;
-        _trackingEvents = events;
-        _isLoading = false;
-      });
-      
-      // Verificar si el usuario es administrador
-      final authService = Provider.of<AuthService>(context, listen: false);
-      _isAdmin = authService.isAdmin;
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al cargar detalles: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+  try {
+    // Check if it's a Firestore timestamp object with toDate method
+    if (date.runtimeType.toString().contains('Timestamp')) {
+      try {
+        // This works for actual Firestore Timestamp objects
+        final dateTime = date.toDate();
+        return DateFormat('dd/MM/yyyy').format(dateTime);
+      } catch (e) {
+        print('Error calling toDate on Timestamp: $e');
       }
+    }
+    
+    // Handle Firestore timestamp as Map representation
+    if (date is Map) {
+      // Check various timestamp formats
+      if (date['_seconds'] != null) {
+        // Standard Firestore JSON timestamp format
+        final seconds = date['_seconds'];
+        final dateTime = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+        return DateFormat('dd/MM/yyyy').format(dateTime);
+      } else if (date['seconds'] != null) {
+        // Alternative timestamp format
+        final seconds = date['seconds'];
+        final dateTime = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+        return DateFormat('dd/MM/yyyy').format(dateTime);
+      } else if (date['toDate'] != null) {
+        // If toDate exists as a key but is not callable,
+        // we should handle the value at that key
+        return _formatDate(date['toDate']);
+      } else if (date['value'] != null) {
+        // Sometimes timestamps are wrapped with a value field
+        return _formatDate(date['value']);
+      } else if (date.toString().contains('Timestamp')) {
+        // Last resort parsing for Timestamp string representation
+        final regex = RegExp(r'seconds=(\d+)');
+        final match = regex.firstMatch(date.toString());
+        if (match != null && match.groupCount >= 1) {
+          final seconds = int.parse(match.group(1)!);
+          final dateTime = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+          return DateFormat('dd/MM/yyyy').format(dateTime);
+        }
+      }
+    } else if (date is String) {
+      // Try parsing string formats
+      try {
+        final dateTime = DateTime.parse(date);
+        return DateFormat('dd/MM/yyyy').format(dateTime);
+      } catch (e) {
+        // Check if it's a Spanish format date
+        if (date.contains('de ') && date.contains(',')) {
+          try {
+            final months = {
+              'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4, 'mayo': 5, 'junio': 6,
+              'julio': 7, 'agosto': 8, 'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12
+            };
+            
+            final dateParts = date.split(',')[0].trim().split(' de ');
+            final day = int.parse(dateParts[0]);
+            final month = months[dateParts[1].toLowerCase()] ?? 1;
+            final year = int.parse(dateParts[2]);
+            
+            final dateTime = DateTime(year, month, day);
+            return DateFormat('dd/MM/yyyy').format(dateTime);
+          } catch (e) {
+            print('Error parsing Spanish date: $e');
+            return date;
+          }
+        }
+        return date;
+      }
+    } else if (date is DateTime) {
+      return DateFormat('dd/MM/yyyy').format(date);
+    }
+    
+    // If we get here, just return the string representation
+    return date.toString();
+  } catch (e) {
+    print('Error formatting date: $e');
+    return date?.toString() ?? 'Fecha inválida';
+  }
+}
+  ShipmentStatus _convertStringToShipmentStatus(String status) {
+    switch (status.toLowerCase()) {
+      case 'en proceso':
+      case 'procesando':
+        return ShipmentStatus.enBodega;
+      case 'enviado':
+      case 'en tránsito':
+        return ShipmentStatus.enRutaAeropuerto;
+      case 'en aduana':
+        return ShipmentStatus.enAduana;
+      case 'en destino':
+      case 'llegó a destino':
+        return ShipmentStatus.enPais;
+      case 'en ruta entrega':
+      case 'en ruta final':
+        return ShipmentStatus.enRutaEntrega;
+      case 'entregado':
+      case 'completado':
+        return ShipmentStatus.entregado;
+      default:
+        return ShipmentStatus.enBodega;
     }
   }
 
-  Future<void> _updateShipmentStatus(ShipmentStatus newStatus) async {
-    if (!_isAdmin) return;
+  Widget _buildStatusBadge(String status) {
+    Color badgeColor;
+    IconData badgeIcon;
     
-    setState(() {
-      _isLoading = true;
-    });
-    
-    try {
-      final success = await _shipmentService.updateShipmentStatus(
-        widget.shipmentId, 
-        newStatus,
-      );
-      
-      if (success) {
-        await _loadShipmentDetails();
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Estado actualizado correctamente'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      } else {
-        setState(() {
-          _isLoading = false;
-        });
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Error al actualizar estado'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+    switch (status.toLowerCase()) {
+      case 'en proceso':
+      case 'procesando':
+        badgeColor = Colors.blue;
+        badgeIcon = Icons.inventory_2_outlined;
+        break;
+      case 'enviado':
+      case 'en tránsito':
+        badgeColor = Colors.orange;
+        badgeIcon = Icons.local_shipping_outlined;
+        break;
+      case 'en destino':
+      case 'llegó a destino':
+        badgeColor = Colors.purple;
+        badgeIcon = Icons.home_outlined;
+        break;
+      case 'entregado':
+      case 'completado':
+        badgeColor = Colors.green;
+        badgeIcon = Icons.check_circle_outline;
+        break;
+      default:
+        badgeColor = Colors.grey;
+        badgeIcon = Icons.help_outline;
     }
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: badgeColor.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: badgeColor),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(badgeIcon, size: 16, color: badgeColor),
+          const SizedBox(width: 4),
+          Text(
+            status,
+            style: TextStyle(
+              color: badgeColor,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final authService = Provider.of<AuthService>(context);
-    
     return Scaffold(
-      key: _scaffoldKey,
       appBar: AppBar(
-        title: Text('Envío ${_shipment?['trackingNumber'] ?? ''}'),
+        title: const Text('Detalle del Envío'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.print_outlined),
-            onPressed: () {
-              // Imprimir detalles
-            },
-            tooltip: 'Imprimir',
-          ),
-          IconButton(
-            icon: const Icon(Icons.share_outlined),
-            onPressed: () {
-              // Compartir detalles
-            },
-            tooltip: 'Compartir',
+            icon: const Icon(Icons.refresh),
+            onPressed: _fetchShipmentDetails,
+            tooltip: 'Recargar',
           ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Resumen'),
-            Tab(text: 'Seguimiento'),
-            Tab(text: 'Productos'),
-          ],
-        ),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _shipment == null
-              ? const Center(
-                  child: Text('No se encontró el envío'),
-                )
-              : TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildSummaryTab(),
-                    _buildTrackingTab(),
-                    _buildProductsTab(),
-                  ],
-                ),
-    );
-  }
-
-  Widget _buildSummaryTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildStatusBanner(),
-          const SizedBox(height: 24),
-          _buildShipmentDetails(),
-          const SizedBox(height: 24),
-          _buildActionButtons(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTrackingTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            elevation: 4,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator())
+        : _errorMessage != null
+          ? Center(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text(
-                    'Estado del Envío',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  const Icon(
+                    Icons.error_outline,
+                    size: 64,
+                    color: Colors.red,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    _errorMessage!,
+                    style: const TextStyle(fontSize: 16),
+                    textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 24),
-                  
-                  // Barra de progreso horizontal
-                  ShipmentTrackingTimeline(
-                    currentStatus: _shipment!['currentStatus'],
-                    isInteractive: _isAdmin,
-                    onStatusTap: _isAdmin ? _updateShipmentStatus : null,
+                  ElevatedButton(
+                    onPressed: _fetchShipmentDetails,
+                    child: const Text('Reintentar'),
                   ),
-                  
-                  if (_isAdmin) ...[
-                    const SizedBox(height: 16),
-                    const Divider(),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Como administrador, puedes actualizar el estado haciendo clic en los iconos',
-                      style: TextStyle(
-                        color: AppTheme.mutedTextColor,
-                        fontSize: 12,
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ],
                 ],
               ),
-            ),
-          ),
-          
-          const SizedBox(height: 24),
-          
-          const Text(
-            'Historial Detallado',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          
-          const SizedBox(height: 16),
-          
-          // Timeline vertical detallado
-          Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            elevation: 4,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: ShipmentTrackingTimeline(
-                currentStatus: _shipment!['currentStatus'],
-                isHorizontal: false,
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 24),
-          
-          // Lista de eventos de seguimiento
-          Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            elevation: 4,
-            child: Padding(
+            )
+          : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Shipment header card
+                  Card(
+                    elevation: 3,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                _shipmentDetails['trackingNumber']?.toString() ?? 'Sin número',
+                                style: const TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              _buildStatusBadge(_shipmentDetails['status']?.toString() ?? 'Procesando'),
+                            ],
+                          ),
+                          const SizedBox(height: 24),
+                          ShipmentTrackingTimeline(
+                            currentStatus: _convertStringToShipmentStatus(
+                              _shipmentDetails['status']?.toString() ?? 'Procesando'
+                            ),
+                            showLabels: true,
+                            isHorizontal: true,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 24),
+                  
+                  // Route information
                   const Text(
-                    'Eventos de Seguimiento',
+                    'Información de Ruta',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  
-                  ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: _trackingEvents.length,
-                    separatorBuilder: (context, index) => const Divider(),
-                    itemBuilder: (context, index) {
-                      final event = _trackingEvents[index];
-                      final isLatest = index == 0;
-                      
-                      return ListTile(
-                        leading: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: isLatest 
-                                ? AppTheme.primaryColor.withOpacity(0.1) 
-                                : Colors.grey.shade100,
-                            shape: BoxShape.circle,
+                  const SizedBox(height: 12),
+                  Card(
+                    elevation: 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        children: [
+                          _buildInfoRow(
+                            'Origen', 
+                            _shipmentDetails['origin']?.toString() ?? 'No disponible',
+                            Icons.flight_takeoff
                           ),
-                          child: Icon(
-                            event.icon,
-                            color: isLatest 
-                                ? AppTheme.primaryColor 
-                                : Colors.grey.shade600,
-                            size: 24,
+                          const Divider(),
+                          _buildInfoRow(
+                            'Destino', 
+                            _shipmentDetails['destination']?.toString() ?? 'No disponible',
+                            Icons.flight_land
                           ),
-                        ),
-                        title: Text(
-                          event.description,
-                          style: TextStyle(
-                            fontWeight: isLatest ? FontWeight.bold : FontWeight.normal,
+                          const Divider(),
+                          _buildInfoRow(
+                            'Fecha de creación', 
+                            _shipmentDetails['date']?.toString() ?? 'No disponible',
+                            Icons.calendar_today
                           ),
-                        ),
-                        subtitle: Text(
-                          '${DateFormat('dd MMM yyyy, HH:mm').format(event.timestamp)} - ${event.location}',
-                          style: TextStyle(
-                            color: isLatest 
-                                ? AppTheme.primaryColor 
-                                : AppTheme.mutedTextColor,
+                          const Divider(),
+                          _buildInfoRow(
+                            'Entrega estimada', 
+                            _shipmentDetails['estimatedDelivery']?.toString() ?? 'Pendiente',
+                            Icons.access_time
                           ),
-                        ),
-                        trailing: isLatest 
-                            ? Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, 
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.primaryColor,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: const Text(
-                                  'Último',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ) 
-                            : null,
-                      );
-                    },
+                        ],
+                      ),
+                    ),
                   ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProductsTab() {
-    final products = _shipment!['productsList'] as List<dynamic>;
-    
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            elevation: 4,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+                  
+                  const SizedBox(height: 24),
+                  
+                  // Shipment items
                   const Text(
-                    'Productos',
+                    'Productos del Envío',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
+                  _buildProductsList(),
                   
-                  ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: products.length,
-                    separatorBuilder: (context, index) => const Divider(),
-                    itemBuilder: (context, index) {
-                      final product = products[index];
-                      return ListTile(
-                        leading: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryColor.withOpacity(0.1),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            Icons.inventory_2_outlined,
-                            color: AppTheme.primaryColor,
-                          ),
-                        ),
-                        title: Text(
-                          product['name'],
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        subtitle: Text(
-                          'Cantidad: ${product['quantity']}',
-                        ),
-                        trailing: Text(
-                          '\$${product['price'].toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      );
-                    },
+                  const SizedBox(height: 24),
+                  
+                  // Tracking history
+                  const Text(
+                    'Historial de Seguimiento',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                  
-                  const Divider(),
-                  const SizedBox(height: 8),
-                  
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Total',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      Text(
-                        '\$${_calculateTotal().toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.primaryColor,
-                          fontSize: 18,
-                        ),
-                      ),
-                    ],
-                  ),
+                  const SizedBox(height: 12),
+                  _buildTrackingHistory(),
                 ],
               ),
             ),
-          ),
-        ],
-      ),
     );
   }
 
-  Widget _buildStatusBanner() {
-    final currentStatus = _shipment!['currentStatus'] as ShipmentStatus;
-    
-    return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      elevation: 4,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: _getStatusColor(currentStatus),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(
-                    _getStatusText(currentStatus),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  'Actualizado: ${_trackingEvents.isNotEmpty ? DateFormat('dd MMM yyyy, HH:mm').format(_trackingEvents.first.timestamp) : 'N/A'}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            
-            // Barra de progreso interactiva
-            ShipmentTrackingTimeline(
-              currentStatus: currentStatus,
-              isInteractive: _isAdmin,
-              onStatusTap: _isAdmin ? _updateShipmentStatus : null,
-            ),
-            
-            const SizedBox(height: 16),
-            
-            Text(
-              _getStatusDescription(currentStatus),
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildShipmentDetails() {
-    return Card(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      elevation: 4,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Detalles del Envío',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Origen',
-                        style: TextStyle(
-                          color: AppTheme.mutedTextColor,
-                          fontSize: 12,
-                        ),
-                      ),
-                      Text(
-                        _shipment!['origin'],
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Fecha de envío: ${_shipment!['date']}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Destino',
-                        style: TextStyle(
-                          color: AppTheme.mutedTextColor,
-                          fontSize: 12,
-                        ),
-                      ),
-                      Text(
-                        _shipment!['destination'],
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Entrega estimada: ${_shipment!['estimatedDelivery']}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            const Divider(),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Cliente',
-                        style: TextStyle(
-                          color: AppTheme.mutedTextColor,
-                          fontSize: 12,
-                        ),
-                      ),
-                      Text(
-                        _shipment!['customer'],
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Tracking',
-                        style: TextStyle(
-                          color: AppTheme.mutedTextColor,
-                          fontSize: 12,
-                        ),
-                      ),
-                      Text(
-                        _shipment!['trackingNumber'],
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildActionButtons() {
+  Widget _buildInfoRow(String label, String value, IconData icon) {
     return Row(
       children: [
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: () {
-              // Contactar soporte
-            },
-            icon: const Icon(Icons.message_outlined),
-            label: const Text('Contactar'),
-            style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              backgroundColor: AppTheme.primaryColor,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          ),
+        Icon(
+          icon,
+          color: AppTheme.primaryColor,
+          size: 20,
         ),
-        const SizedBox(width: 16),
+        const SizedBox(width: 12),
         Expanded(
-          child: OutlinedButton.icon(
-            onPressed: () {
-              // Reportar problema
-            },
-            icon: const Icon(Icons.report_problem_outlined),
-            label: const Text('Reportar problema'),
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              foregroundColor: AppTheme.primaryColor,
-              side: const BorderSide(color: AppTheme.primaryColor),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.mutedTextColor,
+                ),
               ),
-            ),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
         ),
       ],
     );
   }
 
-  double _calculateTotal() {
-    double total = 0;
-    for (var product in _shipment!['productsList']) {
-      total += product['price'] * product['quantity'];
-    }
-    return total;
+ Widget _buildProductsList() {
+  final products = _shipmentDetails['productsList'];
+  
+  if (products == null || (products is List && products.isEmpty)) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Center(
+          child: Text(
+            'No hay productos en este envío',
+            style: TextStyle(color: Colors.grey[600]),
+          ),
+        ),
+      ),
+    );
   }
   
-  Color _getStatusColor(ShipmentStatus status) {
-    switch (status) {
-      case ShipmentStatus.enBodega:
-        return Colors.blue;
-      case ShipmentStatus.enRutaAeropuerto:
-        return Colors.orange;
-      case ShipmentStatus.enAduana:
-        return Colors.purple;
-      case ShipmentStatus.enPais:
-        return Colors.teal;
-      case ShipmentStatus.enRutaEntrega:
-        return Colors.amber.shade800;
-      case ShipmentStatus.entregado:
-        return Colors.green;
+  List<dynamic> productList = [];
+  
+  if (products is String) {
+    try {
+      productList = json.decode(products);
+    } catch (e) {
+      print('Error decoding products string: $e');
+      productList = [];
     }
+  } else if (products is List) {
+    productList = products;
   }
   
-  String _getStatusText(ShipmentStatus status) {
-    switch (status) {
-      case ShipmentStatus.enBodega:
-        return 'En Bodega';
-      case ShipmentStatus.enRutaAeropuerto:
-        return 'Hacia Aeropuerto';
-      case ShipmentStatus.enAduana:
-        return 'En Aduana';
-      case ShipmentStatus.enPais:
-        return 'En País Destino';
-      case ShipmentStatus.enRutaEntrega:
-        return 'En Ruta Final';
-      case ShipmentStatus.entregado:
-        return 'Entregado';
+  return Card(
+    elevation: 2,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    child: Padding(
+      padding: const EdgeInsets.all(8),
+      child: ListView.separated(
+        shrinkWrap: true,
+        physics: NeverScrollableScrollPhysics(),
+        itemCount: productList.length,
+        separatorBuilder: (context, index) => Divider(),
+        itemBuilder: (context, index) {
+          final product = productList[index];
+          
+          // Handle different field naming conventions
+          final name = product['name'] ?? product['nombre'] ?? 'Producto sin nombre';
+          final quantity = product['quantity'] ?? product['cantidad'] ?? 1;
+          final price = product['price'] ?? product['precio'] ?? 0.0;
+          final imageUrl = product['imageUrl'] ?? product['imagenUrl'] ?? '';
+          
+          return ListTile(
+            leading: Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(8),
+                image: imageUrl.isNotEmpty
+                    ? DecorationImage(
+                        image: NetworkImage(imageUrl),
+                        fit: BoxFit.cover,
+                        onError: (error, stackTrace) {
+                          print('Error loading image: $error');
+                        },
+                      )
+                    : null,
+              ),
+              child: imageUrl.isEmpty
+                  ? Icon(Icons.inventory_2, color: Colors.grey[400])
+                  : null,
+            ),
+            title: Text(
+              name.toString(),
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: Text('Cantidad: $quantity'),
+            trailing: price != null && price != 0
+                ? Text(
+                    '\$${_formatPrice(price)}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.primaryColor,
+                    ),
+                  )
+                : null,
+          );
+        },
+      ),
+    ),
+  );
+}
+
+String _formatPrice(dynamic price) {
+  if (price == null) return '0.00';
+  
+  try {
+    double value;
+    if (price is int) {
+      value = price.toDouble();
+    } else if (price is double) {
+      value = price;
+    } else if (price is String) {
+      value = double.tryParse(price) ?? 0.0;
+    } else {
+      return '0.00';
     }
+    
+    return value.toStringAsFixed(2);
+  } catch (e) {
+    return '0.00';
+  }
+}
+// Replace the _buildTrackingHistory method with this implementation
+
+Widget _buildTrackingHistory() {
+  // If there are no tracking events, show a message
+  if (_shipmentDetails['trackingHistory'] == null || 
+      (_shipmentDetails['trackingHistory'] is List && _shipmentDetails['trackingHistory'].isEmpty)) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Center(
+          child: Column(
+            children: [
+              Icon(Icons.timeline_outlined, size: 48, color: Colors.grey[400]),
+              const SizedBox(height: 16),
+              Text(
+                'No hay eventos de seguimiento disponibles',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
   
-  String _getStatusDescription(ShipmentStatus status) {
-    switch (status) {
-      case ShipmentStatus.enBodega:
-        return 'Su paquete ha sido recibido en nuestra bodega y está siendo procesado para su envío.';
-      case ShipmentStatus.enRutaAeropuerto:
-        return 'Su paquete está en camino al aeropuerto para ser embarcado hacia su destino.';
-      case ShipmentStatus.enAduana:
-        return 'Su paquete está siendo procesado por aduanas. Este proceso puede tomar entre 1-3 días.';
-      case ShipmentStatus.enPais:
-        return 'Su paquete ha llegado al país de destino y pronto será enviado para entrega final.';
-      case ShipmentStatus.enRutaEntrega:
-        return 'Su paquete está en ruta para ser entregado en su dirección. Llegará en aproximadamente 1-2 días.';
-      case ShipmentStatus.entregado:
-        return 'Su paquete ha sido entregado con éxito. ¡Gracias por confiar en nosotros!';
+  // Get the current status from shipment details
+  final currentStatus = _convertStringToShipmentStatus(
+    _shipmentDetails['status']?.toString() ?? 'Procesando'
+  );
+  
+  return Card(
+    elevation: 2,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // First add the vertical timeline component
+          ShipmentTrackingTimeline(
+            currentStatus: currentStatus,
+            showLabels: true,
+            isHorizontal: false, // Use vertical layout
+          ),
+          
+          // Add a divider
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Divider(),
+          ),
+          
+          // Then show the detailed events from the API
+          _buildDetailedTrackingEvents(),
+        ],
+      ),
+    ),
+  );
+}
+
+// Add a new method to show the detailed events
+Widget _buildDetailedTrackingEvents() {
+  final List<dynamic> events = _shipmentDetails['trackingHistory'] ?? [];
+  
+  // If no events, return empty container
+  if (events.isEmpty) {
+    return Container();
+  }
+  
+  // Sort events by date if possible (newest first)
+  try {
+    events.sort((a, b) {
+      final dateA = a['fecha'] ?? '';
+      final dateB = b['fecha'] ?? '';
+      return dateB.toString().compareTo(dateA.toString());
+    });
+  } catch (e) {
+    print('Error sorting events: $e');
+  }
+  
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text(
+        'Detalles de eventos',
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      const SizedBox(height: 12),
+      ...events.map((event) {
+        // Get event data
+        final status = event['estado'] ?? 'desconocido';
+        final description = event['descripcion'] ?? '';
+        final date = _formatEventDate(event['fecha'] ?? '');
+        final location = event['ubicacion'] ?? '';
+        
+        // Determine event icon and color
+        IconData eventIcon;
+        Color eventColor;
+        
+        switch (status.toLowerCase()) {
+          case 'enbodega':
+            eventIcon = Icons.warehouse_outlined;
+            eventColor = Colors.blue;
+            break;
+          case 'enrutaaeropuerto':
+            eventIcon = Icons.flight_takeoff_outlined;
+            eventColor = Colors.orange;
+            break;
+          case 'enaduana':
+            eventIcon = Icons.security_outlined;
+            eventColor = Colors.purple;
+            break;
+          case 'enpais':
+            eventIcon = Icons.flight_land_outlined;
+            eventColor = Colors.indigo;
+            break;
+          case 'enrutaentrega':
+            eventIcon = Icons.local_shipping_outlined;
+            eventColor = Colors.amber;
+            break;
+          case 'entregado':
+            eventIcon = Icons.check_circle_outline;
+            eventColor = Colors.green;
+            break;
+          default:
+            eventIcon = Icons.info_outline;
+            eventColor = Colors.grey;
+        }
+        
+        // Build event card
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: eventColor.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: eventColor),
+                ),
+                child: Icon(
+                  eventIcon,
+                  color: eventColor,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          _translateStatus(status),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        Text(
+                          date,
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (location.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          location,
+                          style: TextStyle(
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    if (description.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          description,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    ],
+  );
+}
+
+// Add a helper method to format event dates
+String _formatEventDate(dynamic date) {
+  if (date == null) return '';
+  
+  try {
+    DateTime dateTime;
+    
+    if (date is String) {
+      if (date.contains('T')) {
+        dateTime = DateTime.parse(date);
+      } else {
+        return date;
+      }
+    } else if (date is Map) {
+      if (date['_seconds'] != null) {
+        final seconds = date['_seconds'];
+        dateTime = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+      } else if (date['seconds'] != null) {
+        final seconds = date['seconds'];
+        dateTime = DateTime.fromMillisecondsSinceEpoch(seconds * 1000);
+      } else {
+        return date.toString();
+      }
+    } else {
+      return date.toString();
     }
+    
+    return DateFormat('dd/MM/yyyy HH:mm').format(dateTime);
+  } catch (e) {
+    print('Error formatting event date: $e');
+    return date.toString();
   }
 }
 
+// Translate status codes to human-readable text
+String _translateStatus(String status) {
+  switch (status.toLowerCase()) {
+    case 'enbodega':
+      return 'En bodega';
+    case 'enrutaaeropuerto':
+      return 'En ruta al aeropuerto';
+    case 'enaduana':
+      return 'En aduana';
+    case 'enpais':
+      return 'En país destino';
+    case 'enrutaentrega':
+      return 'En ruta para entrega';
+    case 'entregado':
+      return 'Entregado';
+    default:
+      return status;
+  }
+}
+}

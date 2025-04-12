@@ -17,6 +17,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _emailAlerts = true;
   String _language = 'Español';
   final List<String> _languages = ['Español', 'English', 'Português', 'Français'];
+  bool _isAdmin = false;
+  @override
+  void initState() {
+    super.initState();
+    _checkAdminStatus();
+  }
+
+  Future<void> _checkAdminStatus() async {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final isAdmin = await authService.isAdmin();
+    setState(() {
+      _isAdmin = isAdmin;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -63,7 +77,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       fontSize: 14,
                     ),
                   ),
-                  if (isAdmin)
+                  if (_isAdmin)
                     Container(
                       margin: const EdgeInsets.only(top: 4),
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -91,7 +105,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Navigator.pushReplacementNamed(context, '/dashboard');
               },
             ),
-            if (isAdmin) ...[
+            if (_isAdmin) ...[
               ListTile(
                 leading: const Icon(Icons.inventory_2_outlined),
                 title: const Text('Envíos'),

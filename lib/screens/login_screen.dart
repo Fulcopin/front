@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../theme.dart';
 import '../services/auth_service.dart';
 import './register_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
 
@@ -11,6 +12,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  bool _redirectionInProgress = false;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _rememberMe = false;
@@ -19,6 +21,7 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _passwordError;
   String? _loginError;
   bool _isLoading = false; // Add loading state
+  static bool _hasRedirected = false; 
 
   @override
   void initState() {
@@ -93,94 +96,166 @@ void didChangeDependencies() {
     
     return isValid;
   }
-  Future<void> _checkStoredCredentials() async {
-    final authService = Provider.of<AuthService>(context, listen: false);
-    final isAuthenticated = await authService.checkAuth();
-    
-    if (isAuthenticated && mounted) {
-      Navigator.of(context).pushReplacementNamed('/dashboard');
-    }
-  }
+ 
 
 
-  Future<void> _handleLogin() async {
-    if (!_validateInputs()) return;
-    setState(() {
-      _isLoading = true;
-      _loginError = null;
-    });
+ // Update the _handleLogin method
 
-try {
-      final result = await Provider.of<AuthService>(context, listen: false)
-          .login(_emailController.text, _passwordController.text)
-          .timeout(
-        const Duration(seconds: 10),
-        onTimeout: () {
+Future<void> _handleLogin() async {
+  if (!_validateInputs()) return;
+  
+  setState(() {
+    _isLoading = true;
+    _loginError = null;
+  });
+
+  try {
+    // Log login attempt details
+    print('Attempting login with:');
+    print('Email: ${_emailController.text}');
+    print('Password length: ${_passwordController.text.length}');
+
+    final result = await Provider.of<AuthService>(context, listen: false)
+        .login(_emailController.text, _passwordController.text)
+        .timeout(
+      const Duration(seconds: 15),
+      onTimeout: () {
+        if (mounted) {
           setState(() {
             _isLoading = false;
             _loginError = 'Tiempo de espera agotado';
           });
-          return false;
-        },
-      );
-
-      if (mounted) {
-        setState(() => _isLoading = false);
-        
-        if (result) {
-          Navigator.pushReplacementNamed(context, '/dashboard');
-        } else {
-          setState(() => _loginError = 'Credenciales inválidas');
         }
+        return {'success': false};
+      },
+    );
+
+    print('Login result: $result');
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+      
+      if (result['success'] == true) {
+        // Store credentials if "remember me" is checked
+        if (_rememberMe) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('savedEmail', _emailController.text);
+          // Don't store the password in plain text, just store a flag
+          await prefs.setBool('hasCredentials', true);
+        }
+
+        // Check if user is admin and redirect accordingly
+        if (result['isAdmin'] == true) {
+          print('Navigating to admin dashboard');
+          Navigator.pushReplacementNamed(context, '/admin-dashboard');
+        } else {
+          print('Navigating to client dashboard');
+          Navigator.pushReplacementNamed(context, '/dashboard');
+        }
+      } else {
+        setState(() => _loginError = result['message'] ?? 'Credenciales inválidas');
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _loginError = 'Error de conexión: ${e.toString()}';
-        });
-      }
+    }
+  } catch (e) {
+    print('Login exception: $e');
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _loginError = 'Error de conexión: ${e.toString()}';
+      });
     }
   }
+}
 
-  bool _validateInputs() {
-    bool isValid = true;
-    
-    if (_emailController.text.isEmpty) {
-      setState(() => _emailError = 'El email es requerido');
-      isValid = false;
-    }
-    
-    if (_passwordController.text.isEmpty) {
-      setState(() => _passwordError = 'La contraseña es requerida');
-      isValid = false;
-    }
-    
-    return isValid;
+// Update the _validateInputs method for better validation
+bool _validateInputs() {
+  bool isValid = true;
+  
+  // Reset previous errors
+  setState(() {
+    _emailError = null;
+    _passwordError = null;
+    _loginError = null;
+  });
+  
+  // Validate email
+  final email = _emailController.text.trim();
+  if (email.isEmpty) {
+    setState(() => _emailError = 'El correo electrónico es obligatorio');
+    isValid = false;
+  } else if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email)) {
+    setState(() => _emailError = 'Ingrese un correo electrónico válido');
+    isValid = false;
   }
+  
+  // Validate password
+  if (_passwordController.text.isEmpty) {
+    setState(() => _passwordError = 'La contraseña es obligatoria');
+    isValid = false;
+  } else if (_passwordController.text.length < 6) {
+    setState(() => _passwordError = 'La contraseña debe tener al menos 6 caracteres');
+    isValid = false;
+  }
+  
+  return isValid;
+}
+// Add this at the top of your class, outside any methods
+// Static flag to prevent multiple redirections across rebuilds
 
-  // Add to build method:
+
+
+
+Future<void> _checkStoredCredentials() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final savedEmail = prefs.getString('savedEmail');
+    final hasCredentials = prefs.getBool('hasCredentials') ?? false;
+    
+    if (savedEmail != null && savedEmail.isNotEmpty) {
+      setState(() {
+        _emailController.text = savedEmail;
+        _rememberMe = hasCredentials;
+      });
+    }
+    
+    // Check if user is already logged in
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final isAuthenticated = await authService.checkAuthStatus();
+    
+    // Get the current route to prevent redirection loop
+    final currentRoute = ModalRoute.of(context)?.settings.name;
+    final isComingFromAdminDashboard = currentRoute == '/admin-dashboard';
+    
+    if (isAuthenticated && mounted && !isComingFromAdminDashboard) {
+      final isAdmin = await authService.isAdmin();
+      if (isAdmin) {
+        print('User already logged in as admin, redirecting');
+        Navigator.of(context).pushReplacementNamed('/admin-dashboard');
+      } else {
+        print('User already logged in as client, redirecting');
+        Navigator.of(context).pushReplacementNamed('/dashboard');
+      }
+    }
+  } catch (e) {
+    print('Error checking stored credentials: $e');
+  }
+}
+
+ 
    
 
 
 
   @override
-  Widget build(BuildContext context) {
-    final authService = Provider.of<AuthService>(context);
-    
-    // Si ya está autenticado, redirigir al dashboard
-    if (authService.isAuthenticated) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        Navigator.pushReplacementNamed(context, '/dashboard');
-      });
-    }
-    if (_isLoading) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
+Widget build(BuildContext context) {
+  
+  if (_isLoading) {
+    return const Scaffold(
+      body: Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+  }
     return Scaffold(
       body: SafeArea(
         child: LayoutBuilder(

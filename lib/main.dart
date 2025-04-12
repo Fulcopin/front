@@ -10,13 +10,21 @@ import 'screens/my_shipments_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/shipment_detail_screen.dart';
+import 'screens/admin_shipement.dart';
 import 'services/auth_service.dart';
 import 'widgets/authguard.dart';
-void main() {
+import  'screens/admin_dashboard_screen.dart';
+import 'screens/pagosyenvios_screen.dart'; 
+void main()  async  {
+   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize secure storage and load credentials
+  final authService = AuthService();
+  await authService.initializeSession();
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthService()),
+        ChangeNotifierProvider.value(value: authService),
       ],
       child: const CourierApp(),
     ),
@@ -41,10 +49,13 @@ class CourierApp extends StatelessWidget {
         '/dashboard': (context) => const AuthGuard(child: DashboardScreen()),
         '/products': (context) => const ProductsScreen(),
         '/payments': (context) => const PaymentsScreen(),
+        '/admin-dashboard': (context) => const AuthGuard(child: AdminDashboardScreen()),
         '/my-shipments': (context) => const MyShipmentsScreen(),
         '/profile': (context) => const ProfileScreen(),
         '/settings': (context) => const SettingsScreen(),
         '/login': (context) => const LoginScreen(),
+         '/admin/shipments': (context) => const AdminShipmentScreen(),
+          '/admin/pagos-envios': (context) => PagosYEnviosScreen(), // Add this route
       },
       onGenerateRoute: (settings) {
         if (settings.name == '/shipment-detail') {

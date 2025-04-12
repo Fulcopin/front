@@ -4,11 +4,11 @@ import 'dart:io';
 import '../models/product_model.dart';
 import '../services/product_service.dart';
 import '../services/image_service.dart';
-import '../services/web_safe_image.dart';
 import '../theme.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
 class AddProductScreen extends StatefulWidget {
   final Function(Product) onProductAdded;
   
@@ -21,295 +21,169 @@ class AddProductScreen extends StatefulWidget {
 class _AddProductScreenState extends State<AddProductScreen> {
   final _storage = const FlutterSecureStorage();
   final _formKey = GlobalKey<FormState>();
-  final _nombreController = TextEditingController();
+  
+  // Updated controllers to match the new design
+  final _tiendaController = TextEditingController();
   final _descripcionController = TextEditingController();
-  final _pesoController = TextEditingController();
+  final _trackingController = TextEditingController();
   final _precioController = TextEditingController();
-  final _cantidadController = TextEditingController();
-  final _linkController = TextEditingController();
+  final _pesoController = 0;
+  
   final ProductService _productService = ProductService();
-  final CloudinaryService _imageService = CloudinaryService();  // Update to CloudinaryService
+  final CloudinaryService _imageService = CloudinaryService();
+  
   bool _isLoading = false;
   String? _errorMessage;
-  int _currentStep = 0;
- 
-  File? _productImage;
-  File? _invoiceImage;
+  
+  File? _facturaImage;
   final _picker = ImagePicker();
   
-   Widget _buildImagePreview(File? imageFile, String? imageUrl) {
-    if (kIsWeb) {
-      if (imageFile != null) {
-        // Use URL.createObjectURL for web
-        return Image.network(
-          imageFile.path,
-          height: 200,
-          width: double.infinity,
-          fit: BoxFit.cover,
-        );
-      }
-    } else {
-      if (imageFile != null) {
-        return Image.file(
-          imageFile,
-          height: 200,
-          width: double.infinity,
-          fit: BoxFit.cover,
-        );
-      }
-    }
-     if (imageUrl != null) {
-      return Image.network(
-        imageUrl,
-        height: 200,
-        width: double.infinity,
-        fit: BoxFit.cover,
-      );
-    }
-
-    return const SizedBox.shrink();
+  // Default image URL to use if no image is provided
+  final String _defaultImageUrl = 'https://media.istockphoto.com/id/1186665850/es/vector/cami%C3%B3n-de-entrega-de-env%C3%ADo-r%C3%A1pido-dise%C3%B1o-de-icono-de-l%C3%ADnea-ilustraci%C3%B3n-vectorial-para.jpg?s=612x612&w=0&k=20&c=4IODuEWsnMLEgriQF7rOu3mN3CXtXVmQPVgJngit0jE=';
+  
+  @override
+  void initState() {
+    super.initState();
+    _checkAuthentication();
   }
- // Update image picker method
-Future<void> _pickProductImage() async {
-  try {
-    final XFile? pickedFile = await _picker.pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 1024,
-      maxHeight: 1024,
-      imageQuality: 85,
-    );
-    
-    if (pickedFile != null) {
-      if (kIsWeb) {
-        setState(() {
-          _productImage = File(pickedFile.path);
-        });
-      } else {
-        setState(() {
-          _productImage = File(pickedFile.path);
-        });
-      }
-    }
-  } catch (e) {
-    print('Error picking image: $e');
-    setState(() {
-      _errorMessage = 'Error al cargar la imagen: $e';
-    });
-  }
-}
-
-// Replace Image.file with WebSafeImage
-
-
+  
   @override
   void dispose() {
-    _nombreController.dispose();
+    _tiendaController.dispose();
     _descripcionController.dispose();
-    _pesoController.dispose();
+    _trackingController.dispose();
     _precioController.dispose();
-    _cantidadController.dispose();
-    _linkController.dispose();
+
     super.dispose();
   }
-
   
-
-  Future<void> _pickInvoiceImage() async {
-  try {
-    final XFile? pickedFile = await _picker.pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 1024,
-      maxHeight: 1024,
-      imageQuality: 85,
-    );
+  Future<void> _checkAuthentication() async {
+    final userId = await _storage.read(key: 'userId');
+    final token = await _storage.read(key: 'token');
     
-    if (pickedFile != null) {
-      if (kIsWeb) {
-        setState(() {
-          _invoiceImage = File(pickedFile.path);
-        });
-      } else {
-        setState(() {
-          _invoiceImage = File(pickedFile.path);
-        });
+    print('Initial auth check:');
+    print('User ID: $userId');
+    print('Token exists: ${token != null}');
+    
+    if (userId == null || token == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sesión inválida. Redirigiendo al login...'))
+        );
+        Navigator.of(context).pushReplacementNamed('/login');
       }
     }
-  } catch (e) {
-    print('Error picking invoice image: $e');
-    setState(() {
-      _errorMessage = 'Error al cargar la factura: $e';
-    });
   }
-}
-
-Future<void> _submitForm() async {
-  if (_formKey.currentState!.validate()) {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
+  
+  Future<void> _pickImage() async {
     try {
-      final userId = await _storage.read(key: 'id');
-      final token = await _storage.read(key: 'token');
+      final XFile? pickedFile = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
       
-      print('Auth check:');
-      print('User ID from storage: $userId');
-      print('Token present: ${token != null}');
-
-      if (userId == null || token == null) {
-        throw Exception('Sesión expirada. Por favor inicia sesión nuevamente.');
+      if (pickedFile != null) {
+        setState(() {
+          _facturaImage = File(pickedFile.path);
+        });
       }
-
-      // Validate and parse values
-      double precio = double.parse(_precioController.text.trim());
-      double peso = double.parse(_pesoController.text.trim());
-      int cantidad = int.parse(_cantidadController.text.trim());
-
-      print('Valores a enviar:');
-      print('Precio: $precio');
-      print('Peso: $peso');
-      print('Cantidad: $cantidad');
-
-      // Upload images with error logging
-      String? imagenUrl;
-      String? facturaUrl;
+    } catch (e) {
+      print('Error picking image: $e');
+      setState(() {
+        _errorMessage = 'Error al cargar la imagen: $e';
+      });
+    }
+  }
+  
+  String _formatNumber(String value) {
+    if (value.isEmpty) return '';
+    
+    // Remove non-digit characters except decimal point
+    value = value.replaceAll(RegExp(r'[^\d.]'), '');
+    
+    try {
+      // Parse and format to ensure valid number
+      final number = double.parse(value);
+      return number.toString();
+    } catch (e) {
+      return '';
+    }
+  }
+  
+  Future<void> _submitForm() async {
+    if (_formKey.currentState!.validate()) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
 
       try {
-        if (_productImage != null) {
-          imagenUrl = await CloudinaryService.uploadImage(_productImage!);
-          print('Imagen producto subida: $imagenUrl');
+        final userId = await _storage.read(key: 'userId');
+        final token = await _storage.read(key: 'token');
+        
+        if (userId == null || token == null) {
+          throw Exception('Sesión expirada. Por favor inicia sesión nuevamente.');
         }
 
-        if (_invoiceImage != null) {
-          facturaUrl = await CloudinaryService.uploadImage(_invoiceImage!);
-          print('Imagen factura subida: $facturaUrl');
-        }
-      } catch (e) {
-        print('Error subiendo imágenes: $e');
-        throw Exception('Error al subir las imágenes');
-      }
+        // Validate and parse values
+        double precio = double.parse(_precioController.text.trim());
+        double peso = 0;
+        // Use 1 as default quantity since we don't have a field for it
+        int cantidad = 1;
 
-      try {
-            // In _submitForm method
-            final newProduct = Product(
-              id: '',  // Empty for new product
-              id_user: userId, // Use userId from storage
-              nombre: _nombreController.text,
-              descripcion: _descripcionController.text,
-              peso: peso,
-              precio: precio,
-              cantidad: cantidad,
-              link: _linkController.text.isNotEmpty ? _linkController.text : null,
-              imagenUrl: imagenUrl,
-              facturaUrl: facturaUrl,
-              fechaCreacion: DateTime.now(),
-            );
+        // Upload image if available
+        String? facturaUrl;
+        try {
+          if (_facturaImage != null) {
+            facturaUrl = await CloudinaryService.uploadImage(_facturaImage!);
+            print('Imagen factura subida: $facturaUrl');
+          }
+        } catch (e) {
+          print('Error subiendo imagen: $e');
+          // Continue with default image if upload fails
+        }
+
+        // Create product with the user input
+        final newProduct = Product(
+          id: '',  // Empty for new product
+          id_user: userId,
+          nombre: _tiendaController.text,
+          descripcion: _descripcionController.text,
+          peso: peso,
+          precio: precio,
+          cantidad: cantidad,
+          link: _trackingController.text,
+          // Use default image if no image was uploaded
+          imagenUrl: _defaultImageUrl,
+          facturaUrl: facturaUrl,
+          fechaCreacion: DateTime.now(),
+        );
 
         print('Enviando producto al servidor...');
         final addedProduct = await _productService.addProduct(newProduct);
-        print('Respuesta del servidor: $addedProduct');
+        print('Producto guardado con ID: ${addedProduct.id}');
         
         if (mounted) {
           widget.onProductAdded(addedProduct);
-          await _showSuccessDialog();
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Producto registrado exitosamente'))
+          );
+          
+          Navigator.pop(context);
         }
       } catch (e) {
-        print('Error en la petición HTTP: $e');
-        if (e.toString().contains('403')) {
-          throw Exception('No tienes permiso para realizar esta acción. Por favor inicia sesión nuevamente.');
-        }
-        throw Exception('Error al guardar el producto: $e');
+        setState(() {
+          _errorMessage = 'Error: ${e.toString()}';
+          _isLoading = false;
+        });
+        print('Error final: $_errorMessage');
       }
-    } catch (e) {
-      setState(() {
-        _errorMessage = e.toString();
-        _isLoading = false;
-      });
-      print('Error final: $_errorMessage');
     }
   }
-}
-// Update TextFormField validator
-String _formatNumber(String value) {
-  if (value.isEmpty) return '';
-  
-  // Remove non-digit characters except decimal point
-  value = value.replaceAll(RegExp(r'[^\d.]'), '');
-  
-  try {
-    // Parse and format to ensure valid number
-    final number = double.parse(value);
-    return number.toString();
-  } catch (e) {
-    return '';
-  }
-}
-Future<void> _showSuccessDialog() async {
-  await showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (context) => AlertDialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      title: Row(
-        children: [
-          Icon(Icons.check_circle, color: Colors.green[700], size: 28),
-          const SizedBox(width: 8),
-          const Text('¡Producto Registrado!'),
-        ],
-      ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'El producto "${_nombreController.text}" ha sido registrado exitosamente.',
-            style: const TextStyle(fontSize: 16),
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'Ahora puedes incluirlo en tus envíos.',
-            style: TextStyle(color: AppTheme.mutedTextColor),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () {
-            Navigator.pop(context); // Close dialog
-            Navigator.pop(context); // Return to previous screen
-          },
-          child: const Text('VOLVER A PRODUCTOS'),
-        ),
-        ElevatedButton(
-          onPressed: () {
-            Navigator.pop(context);
-            _formKey.currentState!.reset();
-            _nombreController.clear();
-            _descripcionController.clear();
-            _pesoController.clear();
-            _precioController.clear();
-            _cantidadController.clear();
-            _linkController.clear();
-            setState(() {
-              _productImage = null;
-              _invoiceImage = null;
-              _currentStep = 0;
-              _isLoading = false;
-            });
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppTheme.primaryColor,
-            foregroundColor: Colors.white,
-          ),
-          child: const Text('AGREGAR OTRO'),
-        ),
-      ],
-    ),
-  );
-}
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -318,580 +192,190 @@ Future<void> _showSuccessDialog() async {
         elevation: 0,
         backgroundColor: AppTheme.primaryColor,
         foregroundColor: Colors.white,
-        centerTitle: true,
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              AppTheme.primaryColor.withOpacity(0.05),
-              Colors.white,
-            ],
-          ),
-        ),
-        child: Form(
-          key: _formKey,
-          child: Stepper(
-            currentStep: _currentStep,
-            onStepContinue: () {
-              if (_currentStep < 2) {
-                setState(() {
-                  _currentStep += 1;
-                });
-              } else {
-                _submitForm();
-              }
-            },
-            onStepCancel: () {
-              if (_currentStep > 0) {
-                setState(() {
-                  _currentStep -= 1;
-                });
-              } else {
-                Navigator.pop(context);
-              }
-            },
-            controlsBuilder: (context, details) {
-              return Padding(
-                padding: const EdgeInsets.only(top: 20.0),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: _isLoading ? null : details.onStepContinue,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryColor,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: _isLoading && _currentStep == 3
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : Text(_currentStep < 2 ? 'CONTINUAR' : 'GUARDAR PRODUCTO'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: details.onStepCancel,
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          side: BorderSide(color: AppTheme.primaryColor),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: Text(_currentStep > 0 ? 'ATRÁS' : 'CANCELAR'),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-            steps: [
-              Step(
-                title: const Text('Información Básica'),
-                subtitle: const Text('Nombre y descripción del producto'),
-                content: Column(
-                  children: [
-                    if (_errorMessage != null && _currentStep == 0)
-                      _buildErrorMessage(),
-                    
-                    TextFormField(
-                      controller: _nombreController,
-                      decoration: InputDecoration(
-                        labelText: 'Nombre del producto',
-                        hintText: 'Ej: Smartphone XYZ',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        prefixIcon: const Icon(Icons.inventory),
-                        filled: true,
-                        fillColor: Colors.white,
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Por favor ingresa el nombre del producto';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    TextFormField(
-                      controller: _descripcionController,
-                      decoration: InputDecoration(
-                        labelText: 'Descripción',
-                        hintText: 'Describe las características del producto',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        prefixIcon: const Icon(Icons.description),
-                        filled: true,
-                        fillColor: Colors.white,
-                      ),
-                      maxLines: 3,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Por favor ingresa una descripción';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    TextFormField(
-                      controller: _linkController,
-                      decoration: InputDecoration(
-                        labelText: 'Link (opcional)',
-                        hintText: 'URL del producto',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        prefixIcon: const Icon(Icons.link),
-                        filled: true,
-                        fillColor: Colors.white,
-                      ),
-                      keyboardType: TextInputType.url,
-                    ),
-                  ],
-                ),
-                isActive: _currentStep >= 0,
-                state: _currentStep > 0 ? StepState.complete : StepState.indexed,
-              ),
-              Step(
-                title: const Text('Especificaciones'),
-                subtitle: const Text('Peso y cantidad'),
-                content: Column(
-                  children: [
-                    if (_errorMessage != null && _currentStep == 1)
-                      _buildErrorMessage(),
-                    
-                    // Update numeric field validation
-// Add helper methods
-
-
-// Update TextFormField for price
-TextFormField(
-  controller: _precioController,
-  decoration: InputDecoration(
-    labelText: 'Precio',
-    hintText: 'Ej: 99.99',
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-    ),
-    prefixIcon: const Icon(Icons.attach_money),
-    filled: true,
-    fillColor: Colors.white,
-  ),
-  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-  onChanged: (value) {
-    final formattedValue = _formatNumber(value);
-    if (formattedValue != value) {
-      _precioController.value = TextEditingValue(
-        text: formattedValue,
-        selection: TextSelection.collapsed(offset: formattedValue.length),
-      );
-    }
-  },
-  validator: (value) {
-    if (value == null || value.isEmpty) {
-      return 'Ingresa el precio';
-    }
-    try {
-      final price = double.tryParse(value);
-      if (price == null || price <= 0) {
-        return 'El precio debe ser mayor a 0';
-      }
-    } catch (e) {
-      return 'Ingresa un número válido';
-    }
-    return null;
-  },
-),
-TextFormField(
-        controller: _cantidadController,
-        decoration: InputDecoration(
-          labelText: 'Cantidad',
-          hintText: 'Ej: 1',
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
-          prefixIcon: const Icon(Icons.inventory),
-          filled: true,
-          fillColor: Colors.white,
-        ),
-        keyboardType: TextInputType.number,
-        validator: (value) {
-          if (value == null || value.isEmpty) {
-            return 'Ingresa la cantidad';
-          }
-          try {
-            final cantidadNum = int.parse(value);
-            if (cantidadNum <= 0) {
-              return 'La cantidad debe ser mayor a 0';
-            }
-          } catch (e) {
-            return 'Ingresa un número válido';
-          }
-          return null;
-        },
-      ),
-// Update TextFormField for weight
-TextFormField(
-  controller: _pesoController,
-  decoration: InputDecoration(
-    labelText: 'Peso (kg)',
-    hintText: 'Ej: 0.5',
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
-    ),
-    prefixIcon: const Icon(Icons.scale),
-    suffixText: 'kg',
-    filled: true,
-    fillColor: Colors.white,
-  ),
-  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-  onChanged: (value) {
-    final formattedValue = _formatNumber(value);
-    if (formattedValue != value) {
-      _pesoController.value = TextEditingValue(
-        text: formattedValue,
-        selection: TextSelection.collapsed(offset: formattedValue.length),
-      );
-    }
-  },
-  validator: (value) {
-    if (value == null || value.isEmpty) {
-      return 'Ingresa el peso';
-    }
-    try {
-      final weight = double.tryParse(value);
-      if (weight == null || weight <= 0) {
-        return 'El peso debe ser mayor a 0';
-      }
-    } catch (e) {
-      return 'Ingresa un número válido';
-    }
-    return null;
-  },
-),
-                    const SizedBox(height: 16),
-                    
-                    // Información sobre envíos
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator())
+        : SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (_errorMessage != null)
                     Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.blue.shade200),
+                      padding: const EdgeInsets.all(10),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      color: Colors.red.shade100,
+                      child: Text(
+                        _errorMessage!,
+                        style: TextStyle(color: Colors.red),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(Icons.info_outline, color: Colors.blue.shade700),
-                              const SizedBox(width: 8),
-                              const Text(
-                                'Información de Envío',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
+                    ),
+                  
+                  TextFormField(
+                    controller: _tiendaController,
+                    decoration: InputDecoration(
+                      labelText: 'Nombre de la Tienda',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.store),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Por favor ingresa el nombre de la tienda';
+                      }
+                      return null;
+                    },
+                  ),
+                  SizedBox(height: 16),
+                  
+                  TextFormField(
+                    controller: _descripcionController,
+                    decoration: InputDecoration(
+                      labelText: 'Descripción del producto :9 perfumes',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.description),
+                    ),
+                    maxLines: 3,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Por favor ingresa una descripción';
+                      }
+                      return null;
+                    },
+                  ),
+                  SizedBox(height: 16),
+                  
+                  TextFormField(
+                    controller: _trackingController,
+                    decoration: InputDecoration(
+                      labelText: 'Tracking de la Tienda',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.local_shipping),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Por favor ingresa el código de tracking';
+                      }
+                      return null;
+                    },
+                  ),
+                  SizedBox(height: 16),
+                  
+                                TextFormField(
+                  controller: _precioController,
+                  decoration: InputDecoration(
+                    labelText: 'Precio del paquete',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.attach_money),
+                    prefixText: '\$',
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                  ],
+                  onChanged: (value) {
+                    // Allow decimal input without reformatting while typing
+                    if (value.isEmpty) return;
+                    
+                    // Only format if there's an invalid pattern
+                    if (!RegExp(r'^\d*\.?\d{0,2}$').hasMatch(value)) {
+                      final formattedValue = _formatNumber(value);
+                      _precioController.value = TextEditingValue(
+                        text: formattedValue,
+                        selection: TextSelection.collapsed(offset: formattedValue.length),
+                      );
+                    }
+                  },
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Por favor ingresa el precio';
+                    }
+                    try {
+                      final price = double.tryParse(value);
+                      if (price == null || price <= 0) {
+                        return 'El precio debe ser mayor a 0';
+                      }
+                    } catch (e) {
+                      return 'Ingresa un número válido';
+                    }
+                    return null;
+                  },
+                ),
+                SizedBox(height: 16),
+
+                
+                  
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Imagen de la Factura:',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Esta imagen es opcional. Si no se proporciona, se usará una imagen por defecto.',
+                        style: TextStyle(color: AppTheme.mutedTextColor, fontSize: 14),
+                      ),
+                      SizedBox(height: 12),
+                      
+                      InkWell(
+                        onTap: _pickImage,
+                        child: Container(
+                          height: 200,
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: _facturaImage != null 
+                                  ? AppTheme.primaryColor 
+                                  : Colors.grey,
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: _facturaImage != null
+                              ? kIsWeb
+                                  ? Image.network(_facturaImage!.path, fit: BoxFit.cover)
+                                  : Image.file(_facturaImage!, fit: BoxFit.cover)
+                              : Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.add_photo_alternate, size: 50, color: Colors.grey),
+                                      SizedBox(height: 8),
+                                      Text('Toca para agregar factura'),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'El peso del producto afecta directamente el costo de envío. Asegúrate de proporcionar un peso preciso para evitar cargos adicionales.',
-                            style: TextStyle(fontSize: 14),
-                          ),
-                        ],
+                        ),
                       ),
+                    ],
+                  ),
+                  SizedBox(height: 32),
+                  
+                  ElevatedButton(
+                    onPressed: _isLoading ? null : _submitForm,
+                    style: ElevatedButton.styleFrom(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      backgroundColor: AppTheme.primaryColor,
                     ),
-                  ],
-                ),
-                isActive: _currentStep >= 1,
-                state: _currentStep > 1 ? StepState.complete : StepState.indexed,
+                    child: _isLoading
+                      ? SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : Text(
+                          'Registrar Producto',
+                          style: TextStyle(fontSize: 16),
+                        ),
+                  ),
+                ],
               ),
-              Step(
-  title: const Text('Imágenes'),
-  subtitle: const Text('Fotos del producto y factura'),
-  content: Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      if (_errorMessage != null && _currentStep == 2)
-        _buildErrorMessage(),
-      const Text(
-        'Imagen del Producto',
-        style: TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-      const SizedBox(height: 8),
-      const Text(
-        'Sube una foto clara del producto para que podamos identificarlo fácilmente.',
-        style: TextStyle(
-          color: AppTheme.mutedTextColor,
-        ),
-      ),
-      const SizedBox(height: 16),
-      // Selector de imagen del producto
-      GestureDetector(
-        onTap: _pickProductImage,
-        child: Container(
-          height: 200,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: _productImage != null
-                  ? AppTheme.primaryColor
-                  : Colors.grey.shade300,
             ),
           ),
-          child: _productImage != null
-              ? // Replace Image.file section with:
-ClipRRect(
-  borderRadius: BorderRadius.circular(8),
-  child: Stack(
-    children: [
-      WebSafeImage(
-        imageFile: _productImage,
-        width: double.infinity,
-        height: double.infinity,
-        fit: BoxFit.cover,
-      ),
-      Positioned(
-        top: 8,
-        right: 8,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.8),
-            shape: BoxShape.circle,
-          ),
-          child: IconButton(
-            icon: const Icon(Icons.edit, color: AppTheme.primaryColor),
-            onPressed: _pickProductImage,
-            tooltip: 'Cambiar imagen',
-          ),
-        ),
-      ),
-    ],
-  ),
-)
-              : Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.add_a_photo,
-                      size: 48,
-                      color: Colors.grey.shade400,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Toca para agregar una foto',
-                      style: TextStyle(
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ],
-                ),
-        ),
-      ),
-      const SizedBox(height: 24),
-      const Text(
-        'Imagen de la Factura (opcional)',
-        style: TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-      const SizedBox(height: 8),
-      const Text(
-        'Sube una foto de la factura para facilitar el proceso de envío y seguimiento.',
-        style: TextStyle(
-          color: AppTheme.mutedTextColor,
-        ),
-      ),
-      const SizedBox(height: 16),
-      // Selector de imagen de la factura
-      GestureDetector(
-        onTap: _pickInvoiceImage,
-        child: Container(
-          height: 200,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: _invoiceImage != null
-                  ? AppTheme.primaryColor
-                  : Colors.grey.shade300,
-            ),
-          ),
-          child: _invoiceImage != null
-              ? ClipRRect(
-  borderRadius: BorderRadius.circular(8),
-  child: Stack(
-    children: [
-      WebSafeImage(
-        imageFile: _invoiceImage,
-        width: double.infinity,
-        height: double.infinity,
-        fit: BoxFit.cover,
-      ),
-      Positioned(
-        top: 8,
-        right: 8,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.8),
-            shape: BoxShape.circle,
-          ),
-          child: IconButton(
-            icon: const Icon(Icons.edit, color: AppTheme.primaryColor),
-            onPressed: _pickInvoiceImage,
-            tooltip: 'Cambiar factura',
-          ),
-        ),
-      ),
-    ],
-  ),
-)
-              : Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.receipt_long,
-                      size: 48,
-                      color: Colors.grey.shade400,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Toca para agregar la factura',
-                      style: TextStyle(
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                  ],
-                ),
-        ),
-      ),
-      const SizedBox(height: 16),
-      // Información sobre imágenes
-      Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.amber.shade50,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.amber.shade200),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.info_outline, color: Colors.amber.shade700),
-                const SizedBox(width: 8),
-                const Text(
-                  'Importante',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Las imágenes ayudan a identificar tu producto durante el proceso de envío. Una imagen clara de la factura puede agilizar trámites aduaneros para envíos internacionales.',
-              style: TextStyle(fontSize: 14),
-            ),
-          ],
-        ),
-      ),
-    ],
-  ),
-  isActive: _currentStep >= 2,
-  state: _currentStep > 2 ? StepState.complete : StepState.indexed,
-),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildErrorMessage() {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: Colors.red.shade50,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.red.shade200),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.error_outline, color: Colors.red.shade700),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              _errorMessage!,
-              style: TextStyle(color: Colors.red.shade700),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSummaryItem(String label, String value, IconData icon) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: AppTheme.mutedTextColor),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    color: AppTheme.mutedTextColor,
-                    fontSize: 12,
-                  ),
-                ),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
-

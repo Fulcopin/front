@@ -19,6 +19,7 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  bool _isAdmin = false;
   int _selectedIndex = 0;
   int _totalProducts = 0;
   bool _isLoading = true;
@@ -28,7 +29,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.initState();
     _validateSession();
     _loadDashboardData();
+     _loadAdminStatus();
   }
+   Future<void> _loadAdminStatus() async {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final isAdmin = await authService.isAdmin();
+    if (mounted) {
+      setState(() {
+        _isAdmin = isAdmin;
+      });
+    }
+  }
+
    Future<void> _loadDashboardData() async {
     try {
       final products = await ProductService().getProducts();
@@ -118,18 +130,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ),
-      drawer: _buildDrawer(isAdmin),
+      drawer: _buildDrawer(_isAdmin),
       body: Row(
         children: [
           // Navegación lateral para pantallas grandes
           if (MediaQuery.of(context).size.width >= 1100)
             SizedBox(
               width: 250,
-              child: _buildDrawerContents(isAdmin),
+              child: _buildDrawerContents(_isAdmin),
             ),
           // Contenido principal - Mostrar la pantalla seleccionada
           Expanded(
-            child: isAdmin ? _buildAdminDashboard() : _buildClientDashboard(),
+            child: _isAdmin ? _buildAdminDashboard() : _buildClientDashboard(),
           ),
         ],
       ),

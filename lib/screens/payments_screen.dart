@@ -1,476 +1,1326 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme.dart';
-import '../services/auth_service.dart';
-
+import '../services/product_service.dart';
+import '../models/product_model.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter/services.dart'; // Para Clipboard
+import 'dart:async';
+import 'dart:math';
+import '../screens/my_shipments_screen.dart';
+import '../services/shipment_service.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:math' as math;
+import 'package:synchronized/synchronized.dart';
 class PaymentsScreen extends StatefulWidget {
   const PaymentsScreen({Key? key}) : super(key: key);
 
   @override
-  State<PaymentsScreen> createState() => _PaymentsScreenState();
+  _PaymentsScreenState createState() => _PaymentsScreenState();
 }
 
 class _PaymentsScreenState extends State<PaymentsScreen> {
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  bool _isLoading = false;
-  bool _paymentSuccess = false;
-  
-  // Controladores para el formulario
-  final _montoController = TextEditingController();
-  String _metodoPago = 'tarjeta';
+  final ProductService _productService = ProductService();
+  final storage = FlutterSecureStorage();
+  bool _isTransactionProcessed = false;
+final _processingLock = Lock();
+  double _subtotal = 0.0;
+double _iva = 0.0;
+ Timer? _timer;
+ bool _isPaymentVerificationActive = false;
+String _lastProcessedTransactionId = '';
+  bool _isShowingSuccessMessage = false;
+  String? _clientTransactionId;
+  Timer? _paymentCheckTimer;
+  List<Product> _products = [];
+  Set<String> _selectedProductIds = {};
+  double _totalAmount = 0.0;
+  bool _isLoadingProducts = true;
+  String _paymentMethod = 'card'; // 'card' o 'transfer'
+  bool _isProcessingPayment = false;
+  File? _receiptImage;
+  String? _paymentUrl;
+  double _total_iva=0.0;
 
   @override
-  void dispose() {
-    _montoController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _isShowingSuccessMessage = false;
+    _isPaymentVerificationActive = false;
+    _loadPendingTransaction();
+   
+    _loadProducts();
   }
+  // Agregar esta función para generar IDs de transacción
+String generateTransactionId() {
+  final random = Random();
+  final randomPart = random.nextInt(10000).toString().padLeft(4, '0');
+  final timestampPart = DateTime.now().millisecondsSinceEpoch % 10000000;
+  return 'TX${timestampPart}${randomPart}';
+}
+  Future<void> _loadProducts() async {
+    setState(() {
+      _isLoadingProducts = true;
+    });
 
-  Future<void> _realizarPago() async {
-    // Validar el formulario
-    if (_montoController.text.isEmpty) {
+    try {
+      final products = await _productService.getProducts();
+      
+      // Diagnóstico
+      print("===== DIAGNÓSTICO DE PRODUCTOS =====");
+      print("Total de productos: ${products.length}");
+      
+      // Filtrar productos en bodega
+      final productsInWarehouse = products.where((p) {
+        if (p.estado == null) return false;
+        final estadoLower = p.estado!.toLowerCase();
+        return estadoLower == 'en bodega' || estadoLower == 'enbodega';
+      }).toList();
+      
+      print("Productos en bodega: ${productsInWarehouse.length}");
+      print("===================================");
+      
+      setState(() {
+        _products = productsInWarehouse;
+        _isLoadingProducts = false;
+      });
+    } catch (e) {
+      setState(() {
+        _isLoadingProducts = false;
+      });
+      
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Por favor, ingresa un monto'),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text('Error al cargar productos: $e'))
       );
+    }
+  }
+ Future<void> _createShipmentAfterPayment(String transactionId) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final String shipmentKey = 'shipment_created_for_$transactionId';
+    
+    // Double-check with shared preferences
+    if (prefs.getBool(shipmentKey) == true) {
+      print('🔄 Envío ya registrado para transacción $transactionId. Evitando duplicado.');
       return;
     }
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    // Simular procesamiento de pago
-    await Future.delayed(const Duration(seconds: 2));
-
-    setState(() {
-      _isLoading = false;
-      _paymentSuccess = true;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final authService = Provider.of<AuthService>(context);
     
-    return Scaffold(
-      key: _scaffoldKey,
-      appBar: AppBar(
-        title: const Text('Realizar Pago'),
+    // Mark as being processed immediately to prevent duplicates
+    await prefs.setBool(shipmentKey, true);
+    
+    // Get payment ID from preferences or use transaction ID
+    String? pagoId = prefs.getString('lastPaymentId');
+    if (pagoId == null || pagoId.isEmpty) {
+      pagoId = transactionId;
+    }
+    
+    print('📦 Creando envío con ID de pago: $pagoId');
+    // Get product IDs - IMPORTANT: This is what was missing
+    final List<String> productIds = _selectedProductIds.toList();
+    print('Productos a incluir en el envío: $productIds');
+    
+    if (productIds.isEmpty) {
+      throw Exception('No hay productos seleccionados para el envío');
+    }
+    
+    
+    // Get token and address
+    final storage = FlutterSecureStorage();
+    String? token = await storage.read(key: 'token');
+    String? direccion = prefs.getString('userAddress');
+    String? ciudad = prefs.getString('userCity');
+    String? pais = prefs.getString('userCountry');
+    if (token == null || token.isEmpty) {
+      token = await prefs.getString('token');
+    }
+    
+    // Ensure we have an address
+    if (direccion == null || direccion.isEmpty) {
+      direccion = "10 de agosto, jipijapa, Ecuador"; // Default fallback
+    }
+    print('Datos de envío recopilados:');
+    print('- Dirección: $direccion');
+    print('- Ciudad: $ciudad');
+    print('- País: $pais');
+    
+    
+    
+    
+    // Create shipment with proper error handling
+    final shipmentService = ShipmentService();
+    final shipmentResult = await shipmentService.registerShipment(
+      direccion: direccion,
+      pagoId: pagoId,
+      token: token ?? '',
+      origen: "Miami, FL",
+      productIds: productIds, 
+    );
+    
+    print('Resultado de creación de envío: $shipmentResult');
+    
+    if (shipmentResult['success'] != true) {
+      throw Exception('Error al crear envío: ${shipmentResult['message'] ?? "Error desconocido"}');
+    }
+    
+    print('✅ Envío creado correctamente');
+  } catch (e) {
+    print('❌ ERROR al crear envío: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error al crear envío: $e'),
+        backgroundColor: Colors.red,
       ),
-      drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            DrawerHeader(
-              decoration: const BoxDecoration(
-                color: AppTheme.primaryColor,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Vacabox',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    authService.currentUser?.name ?? 'Usuario',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    authService.currentUser?.email ?? '',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.home_outlined),
-              title: const Text('Dashboard'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushReplacementNamed(context, '/dashboard');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.shopping_cart_outlined),
-              title: const Text('Mis Productos'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushReplacementNamed(context, '/products');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.credit_card_outlined),
-              title: const Text('Realizar Pago'),
-              selected: true,
-              onTap: () {
-                Navigator.pop(context);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.inventory_2_outlined),
-              title: const Text('Mis Envíos'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushReplacementNamed(context, '/my-shipments');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.person_outline),
-              title: const Text('Mi Perfil'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushReplacementNamed(context, '/profile');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings_outlined),
-              title: const Text('Configuración'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushReplacementNamed(context, '/settings');
-              },
-            ),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.logout),
-              title: const Text('Cerrar sesión'),
-              onTap: () {
-                authService.logout();
-                Navigator.pushReplacementNamed(context, '/');
-              },
-            ),
-          ],
-        ),
-      ),
-      body: _paymentSuccess
-          ? _buildPaymentSuccess()
-          : _buildPaymentForm(),
     );
   }
+}
 
-  Widget _buildPaymentForm() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  // Add this method to your _PaymentsScreenState class
+ // Add this method to your _PaymentsScreenState class
+Future<void> _debugTokenAndAddress() async {
+  try {
+    print('=== DIAGNÓSTICO DE DATOS DE USUARIO ===');
+    
+    // Check token in FlutterSecureStorage
+    final secureStorage = FlutterSecureStorage();
+    final secureToken = await secureStorage.read(key: 'token');
+    print('Token en SecureStorage: ${secureToken != null ? 'ENCONTRADO' : 'NO ENCONTRADO'}');
+    if (secureToken != null) {
+      print('  - Longitud: ${secureToken.length}');
+      print('  - Primeros 10 caracteres: ${secureToken.substring(0, math.min(10, secureToken.length))}...');
+    }
+    
+    // Check all keys in SecureStorage
+    final allKeys = await secureStorage.readAll();
+    print('Claves en SecureStorage: ${allKeys.keys}');
+    
+    // Check token in SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    final prefsToken = prefs.getString('token');
+    print('Token en SharedPreferences: ${prefsToken != null ? 'ENCONTRADO' : 'NO ENCONTRADO'}');
+    
+    // Check address in SharedPreferences
+    final address = prefs.getString('userAddress');
+    print('Dirección en SharedPreferences: ${address != null ? 'ENCONTRADO' : 'NO ENCONTRADO'}');
+    if (address != null) {
+      print('  - Valor: "$address"');
+    }
+    
+    // Check alternative address keys
+    final alternatives = ['direccion', 'userDireccion', 'direccionUsuario'];
+    for (final key in alternatives) {
+      final value = prefs.getString(key);
+      print('$key en SharedPreferences: ${value != null ? 'ENCONTRADO' : 'NO ENCONTRADO'}');
+    }
+    
+    // Check user profile JSON
+    final userProfile = prefs.getString('userProfile');
+    print('userProfile en SharedPreferences: ${userProfile != null ? 'ENCONTRADO' : 'NO ENCONTRADO'}');
+    if (userProfile != null) {
+      try {
+        final profileData = json.decode(userProfile);
+        print('  - Dirección en perfil: ${profileData['direccion'] ?? 'NO ENCONTRADO'}');
+        print('  - Ciudad en perfil: ${profileData['ciudad'] ?? 'NO ENCONTRADO'}');
+      } catch (e) {
+        print('  - Error al parsear userProfile: $e');
+      }
+    }
+    
+    print('======================================');
+  } catch (e) {
+    print('Error en diagnóstico: $e');
+  }
+}
+// Add these fields to your class
+
+
+// Replace your _startPaymentStatusCheck method with this improved version
+void _startPaymentStatusCheck(String transactionId) {
+  print('Iniciando verificación de pago para transactionId: $transactionId');
+  
+  // Don't start a new verification if one is already running
+  if (_isPaymentVerificationActive) {
+    print('Ya hay una verificación en progreso. Ignorando solicitud adicional.');
+    return;
+  }
+  
+  setState(() {
+    _isPaymentVerificationActive = true;
+  });
+  
+  // Create transaction processed key for this specific transaction
+  final String processedKey = 'transaction_processed_$transactionId';
+  
+  // Crear un timer que verifica el estado del pago cada 3 segundos
+  _timer = Timer.periodic(Duration(seconds: 3), (timer) async {
+    try {
+      // Check if already processed first - most efficient check
+      if (_isTransactionProcessed) {
+        print('Transacción ya procesada en memoria. Cancelando verificación.');
+        timer.cancel();
+        setState(() {
+          _isPaymentVerificationActive = false;
+        });
+        return;
+      }
+      
+      // Check in persistent storage
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(processedKey) == true) {
+        print('Transacción ya procesada según SharedPreferences. Cancelando verificación.');
+        _isTransactionProcessed = true;
+        timer.cancel();
+        setState(() {
+          _isPaymentVerificationActive = false;
+        });
+        return;
+      }
+      
+      // Verificar que transactionId no esté vacío
+      if (transactionId == null || transactionId.isEmpty) {
+        print('ERROR: TransactionId es nulo o vacío');
+        timer.cancel();
+        setState(() {
+          _isPaymentVerificationActive = false;
+        });
+        return;
+      }
+      
+      print('Llamando a checkPaymentStatus con ID: $transactionId (Intento ${timer.tick})');
+      Map<String, dynamic> response = await ProductService().checkPaymentStatus(transactionId);
+      
+      // Verificar si el pago fue exitoso basado en la respuesta
+      bool success = false;
+      
+      if (response.containsKey('transactionStatus')) {
+        success = response['transactionStatus'] == 'Approved';
+      } else if (response.containsKey('success')) {
+        success = response['success'] == true;
+      }
+      
+      if (success) {
+        // Use synchronization to ensure only one thread processes this transaction
+        bool shouldProcess = false;
+        
+        await _processingLock.synchronized(() async {
+  // Double-check if processed
+            if (!_isTransactionProcessed && prefs.getBool(processedKey) != true) {
+              // Mark as processed immediately in both memory and storage
+              _isTransactionProcessed = true;
+              await prefs.setBool(processedKey, true);
+              shouldProcess = true;
+            }
+          });
+        
+        if (!shouldProcess) {
+          print('Transacción marcada como procesada durante sincronización. Cancelando procesamiento adicional.');
+          timer.cancel();
+          setState(() {
+            _isPaymentVerificationActive = false;
+          });
+          return;
+        }
+        
+        // Cancel timer first to prevent more verification attempts
+        timer.cancel();
+        
+        print('✅ Pago confirmado como exitoso. Iniciando procesamiento...');
+        _lastProcessedTransactionId = transactionId;
+        
+        // Update UI state
+        setState(() {
+          _isPaymentVerificationActive = false;
+        });
+        
+        // Process the payment - only once
+        await _processSuccessfulPayment(transactionId, response);
+      } else if (timer.tick > 100) { // Reduced from 200 to 100 (5 minutes max)
+        timer.cancel();
+        setState(() {
+          _isPaymentVerificationActive = false;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No se pudo verificar el pago después de varios intentos. Intente nuevamente.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      print('ERROR al verificar pago: $e');
+      
+      if (timer.tick > 5) {
+        timer.cancel();
+        setState(() {
+          _isPaymentVerificationActive = false;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error verificando pago: $e')),
+        );
+      }
+    }
+  });
+}
+
+// New method to centralize successful payment processing
+Future<void> _processSuccessfulPayment(String transactionId, Map<String, dynamic> paymentData) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final processedKey = 'transaction_processed_$transactionId';
+    
+    // Extra safety check - don't process if already done
+    if (prefs.getBool(processedKey) != true) {
+      print('⚠️ ERROR: Intento de procesar transacción sin marcarla primero');
+      await prefs.setBool(processedKey, true);
+    }
+    
+    // 1. Mark products as paid
+    final List<String> productIds = _selectedProductIds.toList();
+    print('Productos a marcar como pagados: $productIds');
+    
+    if (productIds.isEmpty) {
+      print('⚠️ ERROR: No hay productos seleccionados para procesar');
+      return;
+    }
+    
+    // 2. Mark products as paid in the backend
+    final markSuccess = await _productService.markProductsAsPaidAsUser(productIds);
+    if (!markSuccess) {
+      throw Exception('No se pudo marcar los productos como pagados');
+    }
+    
+    // 3. Register the payment in the backend - this should return the payment ID
+    final paymentResult = await _productService.registerPayment(
+      transactionId,
+      _total_iva,
+      productIds,
+      paymentData,
+    );
+    
+    print('Resultado de registro de pago: $paymentResult');
+    
+    // 4. Create the shipment using the payment ID from the backend response
+    final shipmentKey = 'shipment_created_for_$transactionId';
+    if (prefs.getBool(shipmentKey) != true) {
+      await _createShipmentAfterPayment(transactionId);
+      await prefs.setBool(shipmentKey, true);
+    }
+    
+    // 5. Show success message and navigate
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Pago procesado correctamente. Redirigiendo...'),
+        backgroundColor: Colors.green,
+      ),
+    );
+    
+    // Small delay before navigating
+    await Future.delayed(Duration(seconds: 1));
+    
+    // 6. Navigate to shipments screen
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (context) => MyShipmentsScreen()),
+      (route) => false
+    );
+  } catch (e) {
+    print('ERROR al procesar pago exitoso: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Error al procesar el pago: $e'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+}
+  void _updateSelectedProducts(String productId, bool isSelected) {
+    setState(() {
+      if (isSelected) {
+        _selectedProductIds.add(productId);
+      } else {
+        _selectedProductIds.remove(productId);
+      }
+      _calculateTotal();
+    });
+  }
+
+  void _calculateTotal() {
+  // Calcular subtotal (suma de productos)
+  double subtotal = 0.0;
+  for (final product in _products) {
+    if (_selectedProductIds.contains(product.id)) {
+      subtotal += product.precio * product.cantidad;
+    }
+  }
+  
+  // Calcular IVA (15%)
+  double iva = subtotal * 0.15;
+  
+  // Calcular total con IVA
+  double totalConIva = subtotal + iva;
+  
+  // Redondear a 2 decimales
+  final subtotalRedondeado = double.parse(subtotal.toStringAsFixed(2));
+  final ivaRedondeado = double.parse(iva.toStringAsFixed(2));
+  final totalRedondeado = double.parse(totalConIva.toStringAsFixed(2));
+  
+  setState(() {
+    _subtotal = subtotalRedondeado;  // Guarda el subtotal para usarlo en la UI si es necesario
+    _iva = ivaRedondeado;           // Guarda el IVA para usarlo en la UI si es necesario
+    _totalAmount = subtotalRedondeado;
+    _total_iva= _totalAmount+_iva; // Actualiza el total con IVA
+  });
+  
+  print('Subtotal: $_subtotal');
+  print('IVA (15%): $_iva');
+  print('Total con IVA: $_totalAmount');
+}
+
+ 
+Future<void> _processCardPayment() async {
+  if (_selectedProductIds.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Selecciona al menos un producto para pagar'))
+    );
+    return;
+  }
+
+  // Asegurar que el monto tenga 2 decimales
+  final exactAmount = double.parse(_totalAmount.toStringAsFixed(2));
+  
+  // Generar y guardar el ID de transacción
+  final clientTransactionId = generateTransactionId();
+  setState(() {
+    _clientTransactionId = clientTransactionId;
+  });
+  _startPaymentStatusCheck(clientTransactionId);
+  
+  // Guardar en almacenamiento persistente
+  await storage.write(key: 'current_transaction_id', value: clientTransactionId);
+  
+  print('ID de transacción generado: $clientTransactionId');
+  
+  setState(() {
+    _isProcessingPayment = true;
+  });
+
+  try {
+    print('Enviando monto para pago: $exactAmount');
+    
+    // Enviar ID generado a la API
+    final result = await _productService.generateCardPayment(
+      subtotal: exactAmount,
+      clientTransactionId: clientTransactionId  
+    );
+    
+    setState(() {
+      _isProcessingPayment = false;
+    });
+
+    if (result['success'] == true) {
+      // Obtener URL de pago
+      final String paymentUrl = result['paymentUrl'] ?? result['response'];
+      
+      if (paymentUrl != null && paymentUrl.isNotEmpty) {
+        setState(() {
+          _paymentUrl = paymentUrl;
+        });
+        
+        // Iniciar verificación del pago
+        _startPaymentStatusCheck(clientTransactionId);
+        
+        // Abrir URL de pago
+        _openPaymentUrl(paymentUrl);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se recibió un enlace de pago válido')),
+        );
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${result['message'] ?? "Error desconocido"}')),
+      );
+    }
+  } catch (e) {
+    setState(() {
+      _isProcessingPayment = false;
+    });
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error al procesar el pago: $e')),
+    );
+  }
+}
+// Método para verificar el estado del pago con respaldo manual
+
+// Método para mostrar confirmación manual
+void _showManualConfirmation() {
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => AlertDialog(
+      title: Text('¿Has completado el pago?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          const Text(
-            'Información de Pago',
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Ingresa los detalles para realizar tu pago',
-            style: TextStyle(
-              color: AppTheme.mutedTextColor,
-            ),
-          ),
-          const SizedBox(height: 24),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-        TextField(
-          controller: _montoController,
-          decoration: InputDecoration(
-            labelText: 'Monto a pagar',
-            border: const OutlineInputBorder(),
-            prefixIcon: const Icon(Icons.attach_money),
-            prefixText: '\$',
-          ),
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          Text('Si ya realizaste el pago en la página externa, puedes continuar.'),
+          SizedBox(height: 10),
+          Text('De lo contrario, vuelve a intentarlo más tarde.'),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+          },
+          child: Text('Todavía no'),
         ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Método de pago',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
+        ElevatedButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+            _showPaymentSuccessMessage();
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.green,
+          ),
+          child: Text('Sí, completé el pago'),
+        ),
+      ],
+    ),
+  );
+}
+// Método para abrir URL y comenzar verificación periódica
+Future<void> _openPaymentUrl(String paymentUrl) async {
+  try {
+    final uri = Uri.parse(paymentUrl);
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final String clientTransactionId = _clientTransactionId ?? "1233";
+    if (launched) {
+      // Comenzar a verificar periódicamente el estado del pago
+      _startPaymentStatusCheck(clientTransactionId);
+      
+      // Mostrar mensaje informativo
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Verificando estado del pago...'))
+      );
+    } else {
+      // Si falló el lanzamiento automático, mostrar Snackbar con la URL
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('No se pudo abrir automáticamente el enlace de pago.'),
+              SizedBox(height: 4),
+              SelectableText(paymentUrl, style: TextStyle(color: Colors.white)),
+            ],
+          ),
+          duration: Duration(seconds: 15),
+          action: SnackBarAction(
+            label: 'Copiar',
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: paymentUrl));
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Enlace copiado al portapapeles'))
+              );
+            },
+          ),
+        ),
+      );
+    }
+  } catch (e) {
+    // Código para manejo de errores...
+  }
+}
+
+
+void _showPaymentSuccessMessage() {
+  // Evitamos múltiples navegaciones o mensajes
+  if (_isShowingSuccessMessage) return;
+  _isShowingSuccessMessage = true;
+  
+  // Mostrar el diálogo con los detalles
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) => AlertDialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      title: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.check_circle_outline,
+            color: Colors.green,
+            size: 80,
+          ),
+          SizedBox(height: 16),
+          Text(
+            '¡Pago Exitoso!',
+            style: TextStyle(
+              color: Colors.green,
+              fontWeight: FontWeight.bold,
+              fontSize: 22,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Tu pago ha sido procesado correctamente.',
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(height: 20),
+          // Detalles del pago con desglose
+          Container(
+            padding: EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.grey[100],
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey[300]!),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Subtotal:'),
+                    Text(
+                      '\$${_subtotal.toStringAsFixed(2)} USD',
+                      style: TextStyle(fontWeight: FontWeight.w500),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  RadioListTile<String>(
-                    title: const Text('Tarjeta de Crédito/Débito'),
-                    value: 'tarjeta',
-                    groupValue: _metodoPago,
-                    onChanged: (value) {
-                      setState(() {
-                        _metodoPago = value!;
-                      });
-                    },
-                  ),
-                  RadioListTile<String>(
-                    title: const Text('PayPal'),
-                    value: 'paypal',
-                    groupValue: _metodoPago,
-                    onChanged: (value) {
-                      setState(() {
-                        _metodoPago = value!;
-                      });
-                    },
-                  ),
-                  RadioListTile<String>(
-                    title: const Text('Transferencia Bancaria'),
-                    value: 'transferencia',
-                    groupValue: _metodoPago,
-                    onChanged: (value) {
-                      setState(() {
-                        _metodoPago = value!;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  if (_metodoPago == 'tarjeta') ...[
-                    const TextField(
-                      decoration: InputDecoration(
-                        labelText: 'Número de tarjeta',
-                        border: OutlineInputBorder(),
+                  ],
+                ),
+                SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('IVA (15%):'),
+                    Text(
+                      '\$${_iva.toStringAsFixed(2)} USD',
+                      style: TextStyle(fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+                Divider(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Total pagado:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    Text(
+                      '\$${_totalAmount.toStringAsFixed(2)} USD',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        Container(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: () async {
+              Navigator.of(context).pop();
+              // Crear el envío después de cerrar el diálogo
+            
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              padding: EdgeInsets.symmetric(vertical: 12),
+            ),
+            child: Text('Continuar a Envíos'),
+          ),
+        ),
+      ],
+    ),
+  );
+  
+  // Después de 3 segundos, navegamos a la pantalla de envíos
+  Future.delayed(Duration(seconds: 3), () {
+    _isShowingSuccessMessage = false;
+  });
+}
+  Future<void> _loadPendingTransaction() async {
+  final storage = FlutterSecureStorage();
+  String? transactionId = await storage.read(key: 'pendingTransactionId');
+  
+  // Solo verificar si hay un transactionId pendiente y no se ha verificado antes
+  if (transactionId != null && transactionId.isNotEmpty && 
+      transactionId != _lastProcessedTransactionId && 
+      !_isPaymentVerificationActive) {
+    
+    setState(() {
+      _isPaymentVerificationActive = true;
+    });
+    
+    _startPaymentStatusCheck(transactionId);
+  }
+}
+
+
+Future<void> _processTransferPayment() async {
+  if (_selectedProductIds.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Selecciona al menos un producto para pagar'))
+    );
+    return;
+  }
+
+  if (_receiptImage == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Debes subir un comprobante de la transferencia'))
+    );
+    return;
+  }
+
+  setState(() {
+    _isProcessingPayment = true;
+  });
+
+  try {
+    // Simulación de subida y procesamiento
+    await Future.delayed(const Duration(seconds: 2)); // Simula el tiempo de carga
+    
+    print('Transferencia simulada:');
+    print('- Productos seleccionados: ${_selectedProductIds.length}');
+    print('- Total: \$${_totalAmount.toStringAsFixed(2)}');
+    print('- Imagen seleccionada: ${_receiptImage?.path}');
+    
+    setState(() {
+      _isProcessingPayment = false;
+    });
+    
+    // Mensaje de éxito
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Simulación de pago registrada correctamente'),
+        backgroundColor: Colors.green,
+      )
+    );
+    
+    // Limpiar selección
+    setState(() {
+      _selectedProductIds.clear();
+      _receiptImage = null;
+      _calculateTotal();
+    });
+  } catch (e) {
+    setState(() {
+      _isProcessingPayment = false;
+    });
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error al procesar el pago: $e'))
+    );
+  }
+}
+
+
+  // Método para seleccionar imagen
+  Future<void> _pickImage() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+      
+      if (image != null) {
+        setState(() {
+          _receiptImage = File(image.path);
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al seleccionar imagen: $e'))
+      );
+    }
+  }
+  
+  @override
+void dispose() {
+  if (_timer != null && _timer!.isActive) {
+    _timer!.cancel();
+  }
+  if (_paymentCheckTimer != null && _paymentCheckTimer!.isActive) {
+    _paymentCheckTimer!.cancel();
+  }
+  super.dispose();
+}
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Pagos'),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Gestionar Pagos',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Selecciona los productos que deseas pagar',
+              style: TextStyle(
+                color: AppTheme.mutedTextColor,
+              ),
+            ),
+            const SizedBox(height: 24),
+            
+            // Lista de productos para seleccionar
+            _buildProductsList(),
+            
+            const SizedBox(height: 24),
+            
+            // Resumen de pago
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Resumen del Pago',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                     const SizedBox(height: 16),
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Expanded(
-                          child: const TextField(
-                            decoration: InputDecoration(
-                              labelText: 'Fecha de expiración',
-                              border: OutlineInputBorder(),
-                            ),
+                        const Text('Subtotal'),
+                        Text('\$${_totalAmount.toStringAsFixed(2)}'),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('IVA (15%)'),
+                        Text('\$${(_totalAmount * 0.15).toStringAsFixed(2)}'),
+                      ],
+                    ),
+                    const Divider(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Total',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: const TextField(
-                            decoration: InputDecoration(
-                              labelText: 'CVC',
-                              border: OutlineInputBorder(),
-                            ),
+                        Text(
+                          '\$${(_totalAmount * 1.15).toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.primaryColor,
                           ),
                         ),
                       ],
                     ),
+                  ],
+                ),
+              ),
+            ),
+            
+            const SizedBox(height: 24),
+            
+            // Métodos de pago
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Método de Pago',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const SizedBox(height: 16),
-                    const TextField(
-                      decoration: InputDecoration(
-                        labelText: 'Nombre en la tarjeta',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                  ],
-                  if (_metodoPago == 'paypal') ...[
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.blue),
-                      ),
-                      child: Column(
-                        children: [
-                          const Text(
-                            'Serás redirigido a PayPal para completar el pago',
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 16),
-                          OutlinedButton(
-                            onPressed: () {},
-                            child: const Text('Continuar con PayPal'),
-                            style: OutlinedButton.styleFrom(
-                              minimumSize: const Size(double.infinity, 44),
+                    
+                    // Selector de método de pago
+                    Row(
+                      children: [
+                        Expanded(
+                          child: RadioListTile<String>(
+                            title: Row(
+                              children: const [
+                                Icon(Icons.credit_card),
+                                SizedBox(width: 8),
+                                Text('Tarjeta'),
+                              ],
                             ),
+                            value: 'card',
+                            groupValue: _paymentMethod,
+                            onChanged: (value) => setState(() => _paymentMethod = value!),
                           ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  if (_metodoPago == 'transferencia') ...[
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
-                          Text(
-                            'Datos bancarios:',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
+                        ),
+                        Expanded(
+                          child: RadioListTile<String>(
+                            title: Row(
+                              children: const [
+                                Icon(Icons.account_balance),
+                                SizedBox(width: 8),
+                                Text('Transferencia'),
+                              ],
                             ),
+                            value: 'transfer',
+                            groupValue: _paymentMethod,
+                            onChanged: (value) => setState(() => _paymentMethod = value!),
                           ),
-                          SizedBox(height: 8),
-                          Text('Banco: Banco Nacional'),
-                          Text('Cuenta: 1234-5678-9012-3456'),
-                          Text('Titular: Vacabox Courier S.A.'),
-                          Text('Referencia: Tu ID de cliente'),
-                          SizedBox(height: 8),
-                          Text(
-                            'Una vez realizada la transferencia, envía el comprobante a pagos@vacabox.com',
-                            style: TextStyle(
-                              color: AppTheme.mutedTextColor,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                  ],
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: _isLoading ? null : _realizarPago,
-                    child: _isLoading
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Text('Realizar Pago'),
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 44),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Resumen',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Subtotal'),
-                      Text('\$${_montoController.text.isEmpty ? "0.00" : double.parse(_montoController.text).toStringAsFixed(2)}'),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Impuestos (16%)'),
-                      Text('\$${_montoController.text.isEmpty ? "0.00" : (double.parse(_montoController.text) * 0.16).toStringAsFixed(2)}'),
-                    ],
-                  ),
-                  const Divider(height: 24),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
+                    
+                    const SizedBox(height: 16),
+                    
+                    // Contenido específico del método de pago
+                    if (_paymentMethod == 'card') ...[
                       const Text(
-                        'Total',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
+                        'El pago con tarjeta se procesará a través de un servicio externo. Al continuar, serás redirigido a la plataforma de pago.',
+                        style: TextStyle(fontSize: 14),
+                      ),
+                      const SizedBox(height: 16),
+                      if (_paymentUrl != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: InkWell(
+                            onTap: () async {
+                              final uri = Uri.parse(_paymentUrl!);
+                              if (await canLaunchUrl(uri)) {
+                                await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              }
+                            },
+                            child: Text(
+                              'Volver a abrir enlace de pago',
+                              style: TextStyle(
+                                color: Colors.blue,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ),
+                        ),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _selectedProductIds.isEmpty || _isProcessingPayment
+                              ? null
+                              : _processCardPayment,
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.all(16),
+                          ),
+                          child: _isProcessingPayment
+                              ? Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: const [
+                                    SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text('Procesando...'),
+                                  ],
+                                )
+                              : Text('Pagar con Tarjeta \$${(_totalAmount * 1.16).toStringAsFixed(2)}'),
                         ),
                       ),
-                      Text(
-                        '\$${_montoController.text.isEmpty ? "0.00" : (double.parse(_montoController.text) * 1.16).toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.primaryColor,
+                    ] else if (_paymentMethod == 'transfer') ...[
+                      const Text(
+                        'Instrucciones para transferencia:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Banco: Pichincha\nCuenta: 123456789\nTipo: Corriente\nNombre: Empresa XYZ\nRUC: 1234567890001',
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Sube una captura del comprobante de transferencia:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      InkWell(
+                        onTap: _pickImage,
+                        child: Container(
+                          width: double.infinity,
+                          height: 150,
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: _receiptImage == null
+                              ? const Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.upload_file, size: 48, color: Colors.grey),
+                                      SizedBox(height: 8),
+                                      Text('Haz clic para subir comprobante'),
+                                    ],
+                                  ),
+                                )
+                              : Stack(
+                                  children: [
+                                    Image.file(
+                                      _receiptImage!,
+                                      width: double.infinity,
+                                      height: 150,
+                                      fit: BoxFit.cover,
+                                    ),
+                                    Positioned(
+                                      right: 0,
+                                      child: IconButton(
+                                        icon: Icon(Icons.cancel, color: Colors.red),
+                                        onPressed: () {
+                                          setState(() {
+                                            _receiptImage = null;
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _selectedProductIds.isEmpty || _receiptImage == null || _isProcessingPayment
+                              ? null
+                              : _processTransferPayment,
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.all(16),
+                          ),
+                          child: _isProcessingPayment
+                              ? const Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text('Procesando...'),
+                                  ],
+                                )
+                              : const Text('Confirmar Pago por Transferencia'),
                         ),
                       ),
                     ],
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildPaymentSuccess() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: Colors.green.withOpacity(0.1),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.check,
-              color: Colors.green,
-              size: 48,
-            ),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            '¡Pago realizado con éxito!',
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Tu pago ha sido procesado correctamente',
+  Widget _buildProductsList() {
+    if (_isLoadingProducts) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32.0),
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
+    // Filtrar solo productos con estado "En bodega"
+    final productsInWarehouse = _products.where((p) {
+      if (p.estado == null) return false;
+      
+      final estadoLower = p.estado!.toLowerCase();
+      return estadoLower == 'en bodega' || estadoLower == 'enbodega';
+    }).toList();
+
+    if (productsInWarehouse.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32.0),
+          child: Text(
+            'No tienes productos listos para pago (en bodega)',
             style: TextStyle(
               color: AppTheme.mutedTextColor,
             ),
           ),
-          const SizedBox(height: 24),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pushReplacementNamed(context, '/my-shipments');
-            },
-            child: const Text('Ir a Mis Envíos'),
-            style: ElevatedButton.styleFrom(
-              minimumSize: const Size(200, 44),
+        ),
+      );
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Productos En Bodega - Listos para Pago',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _selectedProductIds.isEmpty 
+                    ? null 
+                    : () {
+                        setState(() {
+                          _selectedProductIds.clear();
+                          _calculateTotal();
+                        });
+                      },
+                  icon: const Icon(Icons.clear_all),
+                  label: const Text('Limpiar Selección'),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 16),
-          TextButton(
-            onPressed: () {
-              setState(() {
-                _paymentSuccess = false;
-                _montoController.clear();
-              });
-            },
-            child: const Text('Realizar otro pago'),
-          ),
-        ],
+            const SizedBox(height: 16),
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: productsInWarehouse.length,
+              separatorBuilder: (context, index) => const Divider(),
+              itemBuilder: (context, index) {
+                final product = productsInWarehouse[index];
+                final isSelected = _selectedProductIds.contains(product.id);
+                
+                return CheckboxListTile(
+                  value: isSelected,
+                  onChanged: (value) {
+                    _updateSelectedProducts(product.id, value ?? false);
+                  },
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          product.nombre,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'En bodega',
+                          style: TextStyle(fontSize: 12, color: Colors.blue.shade800),
+                        ),
+                      ),
+                    ],
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(product.descripcion),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Cantidad: ${product.cantidad} - Peso: ${product.peso} kg',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.mutedTextColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  secondary: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      '\$${(product.precio * product.cantidad).toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.primaryColor,
+                      ),
+                    ),
+                  ),
+                  activeColor: AppTheme.primaryColor,
+                  checkColor: Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    side: BorderSide(
+                      color: isSelected 
+                        ? AppTheme.primaryColor 
+                        : Colors.transparent,
+                      width: 1,
+                    ),
+                  ),
+                  tileColor: isSelected 
+                    ? AppTheme.primaryColor.withOpacity(0.05) 
+                    : null,
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Productos seleccionados: ${_selectedProductIds.length}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  'Total: \$${_totalAmount.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primaryColor,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 }
-

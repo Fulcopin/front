@@ -29,7 +29,13 @@ class _AuthGuardState extends State<AuthGuard> {
     if (!isAuthenticated && widget.child is! LoginScreen && mounted) {
       Navigator.of(context).pushReplacementNamed('/login');
     } else if (isAuthenticated && widget.child is LoginScreen && mounted) {
-      Navigator.of(context).pushReplacementNamed('/dashboard');
+      // Check for admin role
+      final isAdmin = await authService.isAdmin();
+      if (isAdmin) {
+        Navigator.of(context).pushReplacementNamed('/admin-dashboard');
+      } else {
+        Navigator.of(context).pushReplacementNamed('/dashboard');
+      }
     }
     _checking = false;
   }

@@ -10,7 +10,8 @@ class Product {
   final String? imagenUrl;
   final String? facturaUrl;
   final DateTime fechaCreacion;
-
+  final Map<String, dynamic>? usuario;
+  final String estado;
   Product({
     required this.id,
     required this.id_user,
@@ -23,6 +24,8 @@ class Product {
     this.imagenUrl = '',
     this.facturaUrl = '',
     required this.fechaCreacion,
+     this.usuario,
+     this.estado = 'No llegado',
   });
 
   bool get hasImage => imagenUrl != null && imagenUrl!.isNotEmpty;

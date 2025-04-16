@@ -15,6 +15,9 @@ import 'services/auth_service.dart';
 import 'widgets/authguard.dart';
 import  'screens/admin_dashboard_screen.dart';
 import 'screens/pagosyenvios_screen.dart'; 
+import 'screens/admin_alerts_screen.dart'; 
+import 'screens/admin_users_screen.dart'; 
+import 'screens/usa_shipping_address_screen.dart'; 
 void main()  async  {
    WidgetsFlutterBinding.ensureInitialized();
   
@@ -55,7 +58,10 @@ class CourierApp extends StatelessWidget {
         '/settings': (context) => const SettingsScreen(),
         '/login': (context) => const LoginScreen(),
          '/admin/shipments': (context) => const AdminShipmentScreen(),
-          '/admin/pagos-envios': (context) => PagosYEnviosScreen(), // Add this route
+          '/admin/pagos-envios': (context) => PagosYEnviosScreen(), 
+          '/admin-alerts': (context) => const AdminAlertsScreen(),// Add this route
+          '/admin/users': (context) => const AdminUsersScreen(),
+          '/usa-shipping': (context) => const USAShippingAddressScreen(),
       },
       onGenerateRoute: (settings) {
         if (settings.name == '/shipment-detail') {

@@ -299,7 +299,7 @@ Future<void> _loadProducts() async {
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
-        title: const Text('Mis Productos'),
+        title: const Text(' Mis Alertas'),
         elevation: 0,
         backgroundColor: AppTheme.primaryColor,
         foregroundColor: Colors.white,
@@ -358,8 +358,8 @@ Future<void> _loadProducts() async {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.shopping_cart_outlined),
-              title: const Text('Mis Productos'),
+              leading: const Icon(Icons.notifications_outlined),
+              title: const Text('Alerta Bodega'),
               selected: true,
               onTap: () {
                 Navigator.pop(context);
@@ -444,7 +444,7 @@ Future<void> _loadProducts() async {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Gestiona tus Productos',
+                        'ALERTAR BODEGA',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 18,
@@ -453,7 +453,7 @@ Future<void> _loadProducts() async {
                       ),
                       SizedBox(height: 4),
                       Text(
-                        'Agrega, edita y elimina productos para tus envíos',
+                        'Notifica tus envios',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 14,
@@ -622,7 +622,7 @@ Widget _buildProductPrice(Product product) {
             ),
             const SizedBox(height: 24),
             const Text(
-              'No tienes productos registrados',
+              'No tienes alertas',
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
@@ -632,7 +632,7 @@ Widget _buildProductPrice(Product product) {
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 32),
               child: Text(
-                'Agrega productos para poder incluirlos en tus envíos y gestionar tu inventario',
+                'ALERTA TUS ENVIOS',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: AppTheme.mutedTextColor,
@@ -829,36 +829,22 @@ Widget _buildProductPrice(Product product) {
                             children: [
                               _buildProductDetail(
                                 'Peso',
-                                '${product.peso} kg',
+                                '${product.peso} lb',
                                 Icons.scale_outlined,
                               ),
                               _buildProductDetail(
-                                'Precio',
-                                '\$${product.precio.toStringAsFixed(2)}',
-                                Icons.attach_money,
+                                'Tienda',
+                                '${product.nombre}',
+                                Icons.shop,
                               ),
                               _buildProductDetail(
-                                'Cantidad',
-                                '${product.cantidad}',
-                                Icons.inventory_2_outlined,
+                                'tracking',
+                                '${product.link}',
+                                Icons.spatial_tracking_rounded,
                               ),
                             ],
                           ),
                           
-                          // Link del producto
-                          if (product.link != null && product.link!.isNotEmpty) ...[
-                            const SizedBox(height: 16),
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                // Abrir el link
-                              },
-                              icon: const Icon(Icons.link),
-                              label: const Text('Ver enlace'),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: AppTheme.primaryColor,
-                              ),
-                            ),
-                          ],
                           
                           const SizedBox(height: 8),
                           

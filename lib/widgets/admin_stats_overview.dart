@@ -1,105 +1,184 @@
 import 'package:flutter/material.dart';
 import '../theme.dart';
+import '../services/admin_stats_service.dart';
+
 
 class AdminStatsOverview extends StatelessWidget {
   final Map<String, dynamic> stats;
   final bool isLoading;
+  final VoidCallback? onRefresh;
 
   const AdminStatsOverview({
-    Key? key,
+    Key? key, 
     required this.stats,
     this.isLoading = false,
+    this.onRefresh,
   }) : super(key: key);
 
-  @override
-  Widget build(BuildContext context) {
-    if (isLoading) {
-      return _buildLoadingState();
-    }
-
+  Widget _buildStatCard(BuildContext context, String title, String value, 
+                       IconData icon, Color color) {
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Resumen General',
-              style: Theme.of(context).textTheme.titleLarge,
+            Row(
+              children: [
+                Icon(icon, color: color, size: 24),
+                const SizedBox(width: 8),
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: Colors.grey[700],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                // Determinar cuántas tarjetas por fila según el ancho
-                int crossAxisCount = 1;
-                if (constraints.maxWidth > 600) crossAxisCount = 2;
-                if (constraints.maxWidth > 900) crossAxisCount = 3;
-                if (constraints.maxWidth > 1200) crossAxisCount = 4;
+            const SizedBox(height: 12),
+            Text(
+              value,
+              style: const TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      child: Card(
+        elevation: 4,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Estadísticas Generales',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    onPressed: onRefresh,
+                    tooltip: 'Actualizar estadísticas',
+                  ),
+                ],
+              ),
+            ),
+            Builder(
+              builder: (context) {
+                if (isLoading) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(32.0),
+                      child: CircularProgressIndicator(),
+                    ),
+                  );
+                }
+
+                if (stats.isEmpty) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32.0),
+                      child: Column(
+                        children: [
+                          const Icon(Icons.error_outline, 
+                                     color: Colors.red, size: 48),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'No se pudieron cargar las estadísticas',
+                            style: TextStyle(color: Colors.red),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
 
                 return GridView.count(
-                  crossAxisCount: crossAxisCount,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
+                  crossAxisCount: 4,
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  mainAxisSpacing: 16,
+                  crossAxisSpacing: 16,
                   children: [
                     _buildStatCard(
                       context,
                       'Usuarios',
-                      stats['totalUsers'].toString(),
+                      stats['totalUsers']?.toString() ?? '0',
                       Icons.people_outline,
                       Colors.blue,
                     ),
                     _buildStatCard(
                       context,
                       'Productos',
-                      stats['totalProducts'].toString(),
+                      stats['totalProducts']?.toString() ?? '0',
                       Icons.inventory_2_outlined,
                       Colors.green,
                     ),
                     _buildStatCard(
                       context,
                       'Envíos',
-                      stats['totalShipments'].toString(),
+                      stats['totalShipments']?.toString() ?? '0',
                       Icons.local_shipping_outlined,
                       Colors.orange,
                     ),
                     _buildStatCard(
                       context,
                       'Pagos Pendientes',
-                      stats['pendingPayments'].toString(),
+                      stats['pendingPayments']?.toString() ?? '0',
                       Icons.payment_outlined,
                       Colors.red,
                     ),
                     _buildStatCard(
                       context,
                       'En Bodega',
-                      stats['productsInWarehouse'].toString(),
+                      stats['productsInWarehouse']?.toString() ?? '0',
                       Icons.warehouse_outlined,
                       Colors.purple,
                     ),
                     _buildStatCard(
                       context,
                       'En Tránsito',
-                      stats['productsInTransit'].toString(),
+                      stats['productsInTransit']?.toString() ?? '0',
                       Icons.flight_takeoff_outlined,
                       Colors.teal,
                     ),
                     _buildStatCard(
                       context,
                       'Entregados',
-                      stats['productsDelivered'].toString(),
+                      stats['productsDelivered']?.toString() ?? '0',
                       Icons.check_circle_outline,
                       Colors.indigo,
                     ),
                     _buildStatCard(
                       context,
                       'Ingresos',
-                      '\$${stats['revenue'].toStringAsFixed(2)}',
+                      '\$${(stats['revenue'] ?? 0.0).toStringAsFixed(2)}',
                       Icons.attach_money,
                       Colors.amber.shade700,
                     ),
@@ -112,125 +191,4 @@ class AdminStatsOverview extends StatelessWidget {
       ),
     );
   }
-
-  Widget _buildStatCard(
-    BuildContext context,
-    String title,
-    String value,
-    IconData icon,
-    Color color,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: color.withOpacity(0.3),
-          width: 1,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Icon(
-            icon,
-            color: color,
-            size: 28,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textColor,
-                ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            title,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppTheme.mutedTextColor,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLoadingState() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Resumen General',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            GridView.count(
-              crossAxisCount: 4,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              children: List.generate(
-                8,
-                (index) => Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.withOpacity(0.3),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Container(
-                        width: 60,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.withOpacity(0.3),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Container(
-                        width: 80,
-                        height: 16,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.withOpacity(0.3),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
-

@@ -18,6 +18,7 @@ import '../screens/admin_shipement.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import './pagosyenvios_screen.dart'; 
+import '../services/admin_stats_service.dart';
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({Key? key}) : super(key: key);
 
@@ -30,6 +31,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   final StatsService _statsService = StatsService();
   final ProductService _productService = ProductService();
   final NotificationService _notificationService = NotificationService();
+   final AdminStatsService _statsServices = AdminStatsService();
+  
   int _currentPage = 1;
 int _totalProducts = 0; 
 int _pageLimit = 10;
@@ -58,6 +61,7 @@ Timer? _initTimeoutTimer;
     super.initState();
     SharedPreferences.getInstance().then((prefs) {
     prefs.setString('lastScreen', 'admin_dashboard');
+    _loadGeneralStatss();
   });
   _initTimeoutTimer = Timer(Duration(seconds: 10), () {
     if (mounted && !_initialized) {
@@ -82,6 +86,51 @@ void dispose() {
 String _getDisplayStatus(String? status) {
   return status ?? 'En bodega';  // Default to "En bodega" if null
 }
+
+Future<void> _loadGeneralStatss() async {
+  print('Loading admin stats...');
+  try {
+    setState(() {
+      _isLoadingStats = true;
+    });
+    
+    final stats = await _statsServices.getAdminStats();
+    
+    print('Stats loaded successfully: $stats');
+    setState(() {
+      _generalStats = stats;
+      _isLoadingStats = false;
+    });
+  } catch (e) {
+    print('Error loading admin stats: $e');
+    setState(() {
+      _generalStats = {};
+      _isLoadingStats = false;
+    });
+      } catch (e) {
+      print('Error loading admin stats: $e');
+      setState(() {
+        _generalStats = {
+          'totalUsers': 0,
+          'totalProducts': 0,
+          'totalShipments': 0,
+          'pendingPayments': 0,
+          'productsInWarehouse': 0,
+          'productsInTransit': 0,
+          'productsDelivered': 0,
+          'revenue': 0.0,
+        };
+        _isLoadingStats = false;
+      });
+      
+      // Show error in UI
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al cargar estadísticas: $e'))
+        );
+      }
+    }
+  }
 Future<void> _verificarAutenticacionYCargarDatos() async {
   // Prevent multiple checks
   if (_isRedirecting) return;
@@ -1034,7 +1083,7 @@ ListView.builder(
     if (!_initialized) {
       return Scaffold(
        body: RefreshIndicator(
-      onRefresh: _loadData,
+      onRefresh: _loadGeneralStats,
       child: SingleChildScrollView(
         physics: AlwaysScrollableScrollPhysics(),
         child: Column(
@@ -1204,20 +1253,24 @@ ListView.builder(
                 Navigator.pop(context);
               },
             ),
+            // Add this ListTile before the Divider in your drawer
             ListTile(
-              leading: const Icon(Icons.inventory_2_outlined),
-              title: const Text('Envíos'),
+              leading: const Icon(Icons.warning_amber_outlined),
+              title: const Text('Alertas para Clientes'),
               onTap: () {
-                Navigator.pop(context);
-                Navigator.pushReplacementNamed(context, '/shipments');
+                Navigator.pop(context); // Close the drawer
+                Navigator.pushNamed(context, '/admin-alerts');
               },
             ),
+
+           
+            
             ListTile(
               leading: const Icon(Icons.people_outline),
               title: const Text('Usuarios'),
               onTap: () {
                 Navigator.pop(context);
-                Navigator.pushReplacementNamed(context, '/users');
+                Navigator.pushReplacementNamed(context, '/admin/users');
               },
             ),
             // In the drawer ListView inside the build method, add this ListTile:
@@ -1255,14 +1308,7 @@ ListView.builder(
                     Navigator.pushNamed(context, '/admin/pagos-envios');
                   },
                 ),
-            ListTile(
-              leading: const Icon(Icons.shopping_cart_outlined),
-              title: const Text('Productos'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushReplacementNamed(context, '/products');
-              },
-            ),
+            
             const Divider(),
             ListTile(
               leading: const Icon(Icons.logout),
@@ -1303,14 +1349,14 @@ ListView.builder(
               AdminStatsOverview(
                 stats: _generalStats,
                 isLoading: _isLoadingStats,
+                onRefresh: _loadGeneralStatss,
               ),
               const SizedBox(height: 24),
               
-              // Gráfico de envíos por mes - CORREGIDO
-              AdminShipmentsChart(
-  data: _shipmentsByMonth, // Corregido: cambiado de shipmentsByMonth a data
-  isLoading: _isLoadingShipments,
-),
+              const AdminShipmentsChart(),
+            
+          
+          
               const SizedBox(height: 24),
               
               // Productos
@@ -1336,23 +1382,6 @@ ListView.builder(
               
               const SizedBox(height: 24),
               
-              // Notificaciones
-              AdminNotificationsPanel(
-                notifications: _notifications,
-                isLoading: _isLoadingNotifications,
-                onMarkAsRead: _markNotificationAsRead,
-                onDelete: _deleteNotification,
-                onClearAll: _clearAllNotifications,
-              ),
-              
-              const SizedBox(height: 24),
-              
-              // Pagos pendientes
-              AdminPendingPayments(
-                pendingPayments: _pendingPayments,
-                isLoading: _isLoadingPendingPayments,
-                onMarkAsPaid: _markAsPaid,
-              ),
             ],
           ),
         ),

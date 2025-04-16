@@ -1,15 +1,22 @@
-2025/04/03-21:26:00.225 39ac Reusing MANIFEST C:\Users\fupifigu\AppData\Local\Temp\flutter_tools.cfd0ad9a\flutter_tools_chrome_device.a41095c4\Default\WebStorage\48\IndexedDB\indexeddb.leveldb/MANIFEST-000001
-2025/04/03-21:26:00.226 39ac Recovering log #7
-2025/04/03-21:26:00.226 39ac Reusing old log C:\Users\fupifigu\AppData\Local\Temp\flutter_tools.cfd0ad9a\flutter_tools_chrome_device.a41095c4\Default\WebStorage\48\IndexedDB\indexeddb.leveldb/000007.log 
-2025/04/03-21:26:00.227 39ac Delete type=0 #3
-2025/04/03-21:26:00.227 39ac Delete type=0 #4
-2025/04/03-21:26:00.263 5078 Level-0 table #11: started
-2025/04/03-21:26:00.265 5078 Level-0 table #11: 8077 bytes OK
-2025/04/03-21:26:00.267 5078 Delete type=0 #7
-2025/04/03-21:26:00.268 5078 Manual compaction at level-0 from '\x00\x04\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x05\x00\x00\x00' @ 0 : 0; will stop at '\x00\x04\x01\x1f\x04\x03\x01\x03\x00N\x00E\x00W\x03\x00\x00\x00\x00\x00\x00L@\x03\x00\xb0\xd2\x13|_yB\x00\x03\x00\x00\x00\x00\x00\x00\x00@' @ 532 : 1
-2025/04/03-21:26:00.268 5078 Compacting 1@0 + 1@1 files
-2025/04/03-21:26:00.271 5078 Generated table #12@0: 75 keys, 1194 bytes
-2025/04/03-21:26:00.271 5078 Compacted 1@0 + 1@1 files => 1194 bytes
-2025/04/03-21:26:00.273 5078 compacted to: files[ 0 1 1 0 0 0 0 ]
-2025/04/03-21:26:00.273 5078 Delete type=2 #11
-2025/04/03-21:26:00.274 39ac Manual compaction at level-0 from '\x00\x04\x01\x1f\x04\x03\x01\x03\x00N\x00E\x00W\x03\x00\x00\x00\x00\x00\x00L@\x03\x00\xb0\xd2\x13|_yB\x00\x03\x00\x00\x00\x00\x00\x00\x00@' @ 532 : 1 .. '\x00\x05\x00\x00\x00' @ 0 : 0; will stop at (end)
+2025/04/14-13:58:47.687 30e4 Reusing MANIFEST C:\Users\fupifigu\AppData\Local\Temp\flutter_tools.7b6cdf4a\flutter_tools_chrome_device.d208a2fb\Default\WebStorage\48\IndexedDB\indexeddb.leveldb/MANIFEST-000001
+2025/04/14-13:58:47.688 30e4 Recovering log #18
+2025/04/14-13:58:47.689 30e4 Reusing old log C:\Users\fupifigu\AppData\Local\Temp\flutter_tools.7b6cdf4a\flutter_tools_chrome_device.d208a2fb\Default\WebStorage\48\IndexedDB\indexeddb.leveldb/000018.log 
+2025/04/14-13:58:47.689 30e4 Delete type=0 #3
+2025/04/14-13:58:47.689 30e4 Delete type=0 #4
+2025/04/14-13:58:47.689 30e4 Delete type=0 #7
+2025/04/14-13:58:47.690 30e4 Delete type=2 #8
+2025/04/14-13:58:47.690 30e4 Delete type=0 #10
+2025/04/14-13:58:47.690 30e4 Delete type=2 #12
+2025/04/14-13:58:47.690 30e4 Delete type=0 #14
+2025/04/14-13:58:47.690 30e4 Delete type=2 #15
+2025/04/14-13:58:47.690 30e4 Delete type=2 #16
+2025/04/14-13:58:47.737 3444 Level-0 table #23: started
+2025/04/14-13:58:47.740 3444 Level-0 table #23: 8145 bytes OK
+2025/04/14-13:58:47.741 3444 Delete type=0 #18
+2025/04/14-13:58:47.743 30e4 Manual compaction at level-0 from '\x00\x07\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x08\x00\x00\x00' @ 0 : 0; will stop at '\x00\x07\x01\x1f\x04\x03\x01\x03\x00N\x00E\x00W\x03\x00\x00\x00\x00\x00\x00L@\x03\x00\xa0\x02\x9a\xdcbyB\x00\x03\x00\x00\x00\x00\x00\x00\x00@' @ 1060 : 1
+2025/04/14-13:58:47.743 30e4 Compacting 1@0 + 1@1 files
+2025/04/14-13:58:47.745 30e4 Generated table #24@0: 96 keys, 1450 bytes
+2025/04/14-13:58:47.746 30e4 Compacted 1@0 + 1@1 files => 1450 bytes
+2025/04/14-13:58:47.746 30e4 compacted to: files[ 0 1 1 0 0 0 0 ]
+2025/04/14-13:58:47.747 30e4 Delete type=2 #23
+2025/04/14-13:58:47.748 30e4 Manual compaction at level-0 from '\x00\x07\x01\x1f\x04\x03\x01\x03\x00N\x00E\x00W\x03\x00\x00\x00\x00\x00\x00L@\x03\x00\xa0\x02\x9a\xdcbyB\x00\x03\x00\x00\x00\x00\x00\x00\x00@' @ 1060 : 1 .. '\x00\x08\x00\x00\x00' @ 0 : 0; will stop at (end)

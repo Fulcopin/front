@@ -11,7 +11,7 @@ import './image_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:math';
 class ApiConfig {
-  static const String baseUrl = 'http://localhost:5000'; // Actualiza con tu URL real
+  static const String baseUrl = 'https://proyect-currier.onrender.com'; 
 }
 class ShipmentService {
   final _storage = FlutterSecureStorage();

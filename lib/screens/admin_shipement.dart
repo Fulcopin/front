@@ -5,6 +5,9 @@ import '../services/shipment_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+// Add this import at the top of your file:
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 class AdminShipmentScreen extends StatefulWidget {
   const AdminShipmentScreen({Key? key}) : super(key: key);
 
@@ -109,7 +112,7 @@ Future<String?> _getUserToken() async {
     return null;
   }
 }
-// Add this method to update a shipment status
+// Update the _updateShipmentStatus method to include WhatsApp notification
 Future<void> _updateShipmentStatus(String shipmentId, String newStatus) async {
   try {
     final adminToken = await _getUserToken();
@@ -121,19 +124,194 @@ Future<void> _updateShipmentStatus(String shipmentId, String newStatus) async {
         token: adminToken,
       );
       
+      // Get the updated shipment to access latest data
+       final updatedShipment = await _shipmentService.getShipmentById(shipmentId);
       // Refresh the shipments list
       _fetchShipments();
       
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Estado actualizado con éxito')),
+        const SnackBar(
+          content: Text('Estado actualizado con éxito'),
+          duration: Duration(seconds: 2),
+        ),
       );
+      
+      // Show WhatsApp notification dialog
+     if (updatedShipment != null) {
+        _showWhatsAppNotificationDialog(updatedShipment);
+      }
     }
   } catch (e) {
     print('Error updating shipment status: $e');
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Error al actualizar el estado: $e')),
+      SnackBar(
+        content: Text('Error al actualizar el estado: ${e.toString()}'),
+        backgroundColor: Colors.red,
+      ),
     );
   }
+}
+
+void _showWhatsAppNotificationDialog(Map<String, dynamic> shipment) async {
+  // Get client name from shipment
+  final clientName = shipment['userName'] ?? 'Cliente';
+  final trackingNumber = shipment['trackingNumber'] ?? '';
+  final status = shipment['status'] ?? '';
+  
+  // Get phone number from SharedPreferences
+  final prefs = await SharedPreferences.getInstance();
+  final phoneNumber = prefs.getString('telefono') ?? '';
+  
+  // If we couldn't get the phone number, show an error
+  if (phoneNumber.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('No se encontró un número de teléfono para notificar'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+    return;
+  }
+
+  showDialog(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Row(
+        children: [
+          Icon(Icons.chat, color: Color(0xFF25D366), size: 28),
+          const SizedBox(width: 10),
+          const Text('Notificar por WhatsApp'),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('¿Desea notificar a $clientName sobre el cambio de estado?'),
+          const SizedBox(height: 10),
+          Text('Número: $phoneNumber', style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text('Tracking: $trackingNumber', style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text('Nuevo estado: ${_getStatusDisplayName(status)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        ElevatedButton.icon(
+          icon: Icon(Icons.chat, color: Colors.white),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF25D366), // WhatsApp green color
+            foregroundColor: Colors.white,
+          ),
+          label: const Text('Enviar mensaje'),
+          onPressed: () {
+            Navigator.pop(context);
+            _sendWhatsAppNotification(
+              phoneNumber,
+              trackingNumber,
+              status,
+              clientName,
+            );
+          },
+        ),
+        ElevatedButton.icon(
+          icon: Icon(Icons.chat, color: Colors.white),
+          label: Text('Notificar'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF25D366),
+            foregroundColor: Colors.white,
+          ),
+          onPressed: () {
+            Navigator.pop(context);
+            _showWhatsAppNotificationDialog(shipment);
+          },
+
+        ),
+        ElevatedButton(
+          onPressed: () {
+            Navigator.pop(context);
+            _showStatusChangeDialog(
+              shipment['id'],
+              shipment['status'] ?? 
+              shipment['Estado'] ?? 
+              shipment['estado'] ?? 
+              'Procesando'
+            );
+          },
+          child: Text('Cambiar Estado'),
+        ),
+        
+      ],
+    ),
+  );
+}
+// Send WhatsApp notification
+void _sendWhatsAppNotification(String phoneNumber, String trackingNumber, String status, String clientName) {
+  // Format the phone number (remove any non-digit characters and ensure it has Ecuador country code)
+  String formattedNumber = phoneNumber.replaceAll(RegExp(r'[^\d+]'), '');
+  if (!formattedNumber.startsWith('+')) {
+    // Add Ecuador country code if missing
+    formattedNumber = '+593$formattedNumber';
+  }
+  
+  // Create the message
+  final statusName = _getStatusDisplayName(status);
+  final message = 'Hola $clientName, su pedido con número de tracking $trackingNumber ha sido actualizado a estado: $statusName. Por favor revise su estado en la aplicación.';
+  
+  // URL encode the message
+  final encodedMessage = Uri.encodeComponent(message);
+  
+  // Create the WhatsApp URL
+  final whatsappUrl = 'https://wa.me/$formattedNumber?text=$encodedMessage';
+  
+  // Launch the URL
+  launchUrl(Uri.parse(whatsappUrl), mode: LaunchMode.externalApplication).then((success) {
+    if (!success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo abrir WhatsApp. Verifique que esté instalado.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  });
+}
+
+// Helper method to get a user-friendly status name
+String _getStatusDisplayName(String status) {
+  switch (status.toUpperCase()) {
+    case 'RECEIVED':
+      return 'Recibido';
+    case 'IN_TRANSIT':
+      return 'En tránsito';
+    case 'CUSTOMS':
+      return 'En aduana';
+    case 'READY_FOR_PICKUP':
+      return 'Listo para recoger';
+    case 'DELIVERED':
+      return 'Entregado';
+    default:
+      return status;
+  }
+}
+
+// Add this button to your UI where you display shipment information
+Widget _buildWhatsAppButton(Map<String, dynamic> shipment) {
+  return ElevatedButton.icon(
+    icon: const Icon(Icons.chat, color: Colors.white),
+    label: const Text('Notificar'),
+    style: ElevatedButton.styleFrom(
+      backgroundColor: const Color(0xFF25D366), // WhatsApp green color
+      foregroundColor: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+      ),
+    ),
+    onPressed: () => _showWhatsAppNotificationDialog(shipment),
+  );
 }
 void _showShipmentDetails(Map<String, dynamic> shipment) {
   showDialog(
@@ -529,15 +707,15 @@ Widget _buildShipmentsSection() {
                                         ),
                                         PopupMenuItem(
                                           value: 'En tránsito',
-                                          child: Text('En tránsito'),
+                                          child: Text('En tránsito Miami'),
                                         ),
                                         PopupMenuItem(
                                           value: 'En aduana',
-                                          child: Text('En aduana'),
+                                          child: Text('En aduana ecuador'),
                                         ),
                                         PopupMenuItem(
                                           value: 'En país destino',
-                                          child: Text('En país destino'),
+                                          child: Text('En Ecuador'),
                                         ),
                                         PopupMenuItem(
                                           value: 'En ruta entrega',

@@ -10,6 +10,7 @@ class AdminProductsTable extends StatelessWidget {
   final Function(Product)? onDeleteProduct;
   final Function(Product)? onNotifyUser;
   final Function()? onDataUpdated; 
+  final Function(Product)? onEditFullProduct; 
   const AdminProductsTable({
     Key? key,
     required this.products,
@@ -19,6 +20,8 @@ class AdminProductsTable extends StatelessWidget {
     this.onDeleteProduct,
     this.onNotifyUser,
      this.onDataUpdated,
+     this.onEditFullProduct,
+     
   }) : super(key: key);
 
   @override
@@ -56,11 +59,11 @@ class AdminProductsTable extends StatelessWidget {
               scrollDirection: Axis.horizontal,
               child: DataTable(
                 columns: const [
-                  DataColumn(label: Text('Nombre')),
+                  DataColumn(label: Text('Nombre Tienda')),
                   DataColumn(label: Text('Usuario')),
-                  DataColumn(label: Text('Precio')),
-                  DataColumn(label: Text('Peso')),
-                  DataColumn(label: Text('Cantidad')),
+                  DataColumn(label: Text('Precio Envio')),
+                  DataColumn(label: Text('Peso (lb)')),
+                  DataColumn(label: Text('Tracking')),
                   DataColumn(label: Text('Estado')),
                   DataColumn(label: Text('Acciones')),
                 ],
@@ -96,8 +99,8 @@ class AdminProductsTable extends StatelessWidget {
                           ? '${product.usuario!['nombre'] ?? ''} ${product.usuario!['apellido'] ?? ''}'
                           : 'Sin usuario')),
                       DataCell(Text('\$${product.precio.toStringAsFixed(2)}')),
-                      DataCell(Text('${product.peso} kg')),
-                      DataCell(Text('${product.cantidad}')),
+                      DataCell(Text('${product.peso} lb')),
+                      DataCell(Text('${product.link}')),
                       DataCell(
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -128,12 +131,19 @@ class AdminProductsTable extends StatelessWidget {
                               iconSize: 20,
                             ),
                             IconButton(
-                              icon: const Icon(Icons.edit_outlined),
+                              icon: const Icon(Icons.change_circle_outlined),
                               onPressed: () => _showStatusChangeDialog(context, product),
                               tooltip: 'Cambiar Estado',
                               iconSize: 20,
                             ),
                             IconButton(
+                              icon: const Icon(Icons.edit_outlined),  // Add new edit button
+                              onPressed: () => _showEditProductDialog(context, product),
+                              tooltip: 'Editar Producto',
+                              color: Colors.green,
+                              iconSize: 20,
+                            ),
+                                                  IconButton(
                               icon: const Icon(Icons.delete_outline),
                               onPressed: () => onDeleteProduct?.call(product),
                               tooltip: 'Eliminar',
@@ -161,7 +171,101 @@ class AdminProductsTable extends StatelessWidget {
       ),
     );
   }
-
+  
+ void _showEditProductDialog(BuildContext context, Product product) {
+  // Create controllers with current values
+  final nombreController = TextEditingController(text: product.nombre);
+  final descripcionController = TextEditingController(text: product.descripcion);
+  final pesoController = TextEditingController(text: product.peso.toString());
+  final precioController = TextEditingController(text: product.precio.toString());
+  final cantidadController = TextEditingController(text: product.cantidad.toString());
+  final linkController = TextEditingController(text: product.link);
+  
+  showDialog(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: Text('Editar Producto: ${product.nombre}'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nombreController,
+                decoration: const InputDecoration(labelText: 'Nombre de la Tienda'),
+              ),
+              TextField(
+                controller: descripcionController,
+                decoration: const InputDecoration(labelText: 'Descripción Envio'),
+                maxLines: 3,
+              ),
+              TextField(
+                controller: pesoController,
+                decoration: const InputDecoration(labelText: 'Peso (lb)'),
+                keyboardType: TextInputType.number,
+              ),
+              TextField(
+                controller: precioController,
+                decoration: const InputDecoration(labelText: 'Precio Envio (\$)'),
+                keyboardType: TextInputType.number,
+              ),
+              TextField(
+                controller: cantidadController,
+                decoration: const InputDecoration(labelText: 'Cantidad'),
+                keyboardType: TextInputType.number,
+              ),
+              TextField(
+                controller: linkController,
+                decoration: const InputDecoration(labelText: 'Tracking'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              // Create updated product
+              final updatedProduct = Product(
+                id: product.id,
+                id_user: product.id_user,
+                nombre: nombreController.text,
+                descripcion: descripcionController.text,
+                peso: double.tryParse(pesoController.text) ?? product.peso,
+                precio: double.tryParse(precioController.text) ?? product.precio,
+                cantidad: int.tryParse(cantidadController.text) ?? product.cantidad,
+                link: linkController.text,
+                imagenUrl: product.imagenUrl,
+                facturaUrl: product.facturaUrl,
+                fechaCreacion: product.fechaCreacion,
+                estado: product.estado,
+                usuario: product.usuario,
+              );
+              
+              try {
+                // Call your update product method here
+                final productService = ProductService();
+                // Implement updateProduct method in ProductService
+               await productService.updateProduct(updatedProduct);
+                
+                Navigator.pop(context);
+                // Refresh data
+                 onDataUpdated?.call();
+              } catch (e) {
+                print("Error updating product: $e");
+                // Show error to user
+              }
+            },
+            child: const Text('Guardar Cambios'),
+          ),
+        ],
+      );
+    },
+  );
+}
   // ... _buildLoadingState() permanece igual ...
 void _showStatusChangeDialog(BuildContext context, Product product) {
   String? selectedStatus = product.estado;

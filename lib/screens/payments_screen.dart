@@ -28,6 +28,8 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
   bool _isTransactionProcessed = false;
 final _processingLock = Lock();
   double _subtotal = 0.0;
+  bool _includeHomeDelivery = false;
+  final double _homeDeliveryCharge = 6.0;
 double _iva = 0.0;
  Timer? _timer;
  bool _isPaymentVerificationActive = false;
@@ -44,6 +46,7 @@ String _lastProcessedTransactionId = '';
   File? _receiptImage;
   String? _paymentUrl;
   double _total_iva=0.0;
+  double _totalWithDelivery=0.0;
 
   @override
   void initState() {
@@ -141,18 +144,21 @@ String generateTransactionId() {
     if (direccion == null || direccion.isEmpty) {
       direccion = "10 de agosto, jipijapa, Ecuador"; // Default fallback
     }
-    print('Datos de envío recopilados:');
-    print('- Dirección: $direccion');
-    print('- Ciudad: $ciudad');
-    print('- País: $pais');
-    
-    
+    // Format address based on delivery option
+      String direccionFinal;
+      if (_includeHomeDelivery) {
+        // Format: direccion - ciudad - envio a domicilio
+        direccionFinal = "$direccion - ${ciudad ?? ''} - envio a domicilio";
+      } else {
+        // Just use the original address
+        direccionFinal = ciudad?? '';
+      }
     
     
     // Create shipment with proper error handling
     final shipmentService = ShipmentService();
     final shipmentResult = await shipmentService.registerShipment(
-      direccion: direccion,
+      direccion: direccionFinal,
       pagoId: pagoId,
       token: token ?? '',
       origen: "Miami, FL",
@@ -396,7 +402,7 @@ Future<void> _processSuccessfulPayment(String transactionId, Map<String, dynamic
     // 3. Register the payment in the backend - this should return the payment ID
     final paymentResult = await _productService.registerPayment(
       transactionId,
-      _total_iva,
+      _totalWithDelivery,
       productIds,
       paymentData,
     );
@@ -449,13 +455,20 @@ Future<void> _processSuccessfulPayment(String transactionId, Map<String, dynamic
 
   void _calculateTotal() {
   // Calcular subtotal (suma de productos)
-  double subtotal = 0.0;
+  
+   double pesoTotal = 0.0;
   for (final product in _products) {
     if (_selectedProductIds.contains(product.id)) {
-      subtotal += product.precio * product.cantidad;
+      pesoTotal += product.peso;
     }
   }
-  
+  double subtotal = 0.0;
+  if (pesoTotal < 1.0 && pesoTotal > 0) {
+    subtotal = 5.5;
+  } else {
+    // Si es 1 libra o más, cobrar $5.5 por libra
+    subtotal = pesoTotal * 5.5;
+  }
   // Calcular IVA (15%)
   double iva = subtotal * 0.15;
   
@@ -474,9 +487,7 @@ Future<void> _processSuccessfulPayment(String transactionId, Map<String, dynamic
     _total_iva= _totalAmount+_iva; // Actualiza el total con IVA
   });
   
-  print('Subtotal: $_subtotal');
-  print('IVA (15%): $_iva');
-  print('Total con IVA: $_totalAmount');
+  
 }
 
  
@@ -487,10 +498,12 @@ Future<void> _processCardPayment() async {
     );
     return;
   }
-
+  // Calculate the total including delivery if selected
+  final double _total_iva = _totalAmount * 1.15;
+  final double totalWithDelivery = _total_iva + (_includeHomeDelivery ? _homeDeliveryCharge : 0);
   // Asegurar que el monto tenga 2 decimales
-  final exactAmount = double.parse(_totalAmount.toStringAsFixed(2));
-  
+  final exactAmount = double.parse(totalWithDelivery.toStringAsFixed(2));
+  final finul=totalWithDelivery-(_totalAmount * 0.15);
   // Generar y guardar el ID de transacción
   final clientTransactionId = generateTransactionId();
   setState(() {
@@ -512,7 +525,7 @@ Future<void> _processCardPayment() async {
     
     // Enviar ID generado a la API
     final result = await _productService.generateCardPayment(
-      subtotal: exactAmount,
+      subtotal: finul,
       clientTransactionId: clientTransactionId  
     );
     
@@ -857,6 +870,12 @@ void dispose() {
 }
   @override
   Widget build(BuildContext context) {
+    // First, make sure these variables are declared in your class
+   
+    
+    final double _total_iva = _totalAmount * 1.15;
+    final double totalWithDelivery = _total_iva + (_includeHomeDelivery ? _homeDeliveryCharge : 0);
+    _totalWithDelivery=totalWithDelivery ;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pagos'),
@@ -866,28 +885,48 @@ void dispose() {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Gestionar Pagos',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Selecciona los productos que deseas pagar',
-              style: TextStyle(
-                color: AppTheme.mutedTextColor,
-              ),
-            ),
-            const SizedBox(height: 24),
+            // Existing heading and description...
             
             // Lista de productos para seleccionar
             _buildProductsList(),
             
+            const SizedBox(height: 16),
+            
+            // Add Home Delivery Option Card
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Opciones de Entrega',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    CheckboxListTile(
+                      title: const Text('Envío a domicilio'),
+                      subtitle: Text('Costo adicional: \$${_homeDeliveryCharge.toStringAsFixed(2)}'),
+                      value: _includeHomeDelivery,
+                      activeColor: AppTheme.primaryColor,
+                      contentPadding: EdgeInsets.zero,
+                      onChanged: (value) {
+                        setState(() {
+                          _includeHomeDelivery = value ?? false;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            
             const SizedBox(height: 24),
             
-            // Resumen de pago
+            // Resumen de pago (updated)
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -917,6 +956,17 @@ void dispose() {
                         Text('\$${(_totalAmount * 0.15).toStringAsFixed(2)}'),
                       ],
                     ),
+                    // Add delivery charge row if selected
+                    if (_includeHomeDelivery) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Envío a domicilio'),
+                          Text('\$${_homeDeliveryCharge.toStringAsFixed(2)}'),
+                        ],
+                      ),
+                    ],
                     const Divider(height: 24),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -928,7 +978,7 @@ void dispose() {
                           ),
                         ),
                         Text(
-                          '\$${(_totalAmount * 1.15).toStringAsFixed(2)}',
+                          '\$${totalWithDelivery.toStringAsFixed(2)}',
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             color: AppTheme.primaryColor,
@@ -940,7 +990,7 @@ void dispose() {
                 ),
               ),
             ),
-            
+
             const SizedBox(height: 24),
             
             // Métodos de pago
@@ -1021,122 +1071,90 @@ void dispose() {
                             ),
                           ),
                         ),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: _selectedProductIds.isEmpty || _isProcessingPayment
-                              ? null
-                              : _processCardPayment,
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.all(16),
-                          ),
-                          child: _isProcessingPayment
-                              ? Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: const [
-                                    SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text('Procesando...'),
-                                  ],
-                                )
-                              : Text('Pagar con Tarjeta \$${(_totalAmount * 1.16).toStringAsFixed(2)}'),
-                        ),
-                      ),
-                    ] else if (_paymentMethod == 'transfer') ...[
-                      const Text(
-                        'Instrucciones para transferencia:',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Banco: Pichincha\nCuenta: 123456789\nTipo: Corriente\nNombre: Empresa XYZ\nRUC: 1234567890001',
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Sube una captura del comprobante de transferencia:',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      InkWell(
-                        onTap: _pickImage,
-                        child: Container(
-                          width: double.infinity,
-                          height: 150,
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: _receiptImage == null
-                              ? const Center(
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.upload_file, size: 48, color: Colors.grey),
-                                      SizedBox(height: 8),
-                                      Text('Haz clic para subir comprobante'),
-                                    ],
-                                  ),
-                                )
-                              : Stack(
-                                  children: [
-                                    Image.file(
-                                      _receiptImage!,
-                                      width: double.infinity,
-                                      height: 150,
-                                      fit: BoxFit.cover,
-                                    ),
-                                    Positioned(
-                                      right: 0,
-                                      child: IconButton(
-                                        icon: Icon(Icons.cancel, color: Colors.red),
-                                        onPressed: () {
-                                          setState(() {
-                                            _receiptImage = null;
-                                          });
-                                        },
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: _selectedProductIds.isEmpty || _receiptImage == null || _isProcessingPayment
-                              ? null
-                              : _processTransferPayment,
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.all(16),
-                          ),
-                          child: _isProcessingPayment
-                              ? const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text('Procesando...'),
-                                  ],
-                                )
-                              : const Text('Confirmar Pago por Transferencia'),
-                        ),
-                      ),
-                    ],
+                     SizedBox(
+  width: double.infinity,
+  child: ElevatedButton(
+    onPressed: _selectedProductIds.isEmpty || _isProcessingPayment
+        ? null
+        : _processCardPayment,
+    style: ElevatedButton.styleFrom(
+      padding: const EdgeInsets.all(16),
+    ),
+    child: _isProcessingPayment
+        ? Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              ),
+              SizedBox(width: 8),
+              Text('Procesando...'),
+            ],
+          )
+        : Text('Pagar con Tarjeta \$${totalWithDelivery.toStringAsFixed(2)}'),
+  ),
+),
+] else if (_paymentMethod == 'transfer') ...[
+  _buildTransferPaymentInstructions(),
+  const SizedBox(height: 16),
+  SizedBox(
+    width: double.infinity,
+    child: ElevatedButton(
+      onPressed: _selectedProductIds.isEmpty || _isProcessingPayment
+          ? null
+          : () {
+              // Show confirmation dialog and handle transfer payment
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Confirmar pago por transferencia'),
+                  content: const Text(
+                    'Al confirmar esta opción, se registrará su pedido y deberá enviar el comprobante de transferencia al número indicado para completar el proceso.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancelar'),
+                    ),
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _processTransferPayment();
+                      },
+                      child: const Text('Confirmar'),
+                    ),
+                  ],
+                ),
+              );
+            },
+      style: ElevatedButton.styleFrom(
+        padding: const EdgeInsets.all(16),
+      ),
+      child: _isProcessingPayment
+          ? const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                ),
+                SizedBox(width: 8),
+                Text('Procesando...'),
+              ],
+            )
+          : const Text('Confirmar Pago por Transferencia'),
+    ),
+  ),
+],
                   ],
                 ),
               ),
@@ -1146,7 +1164,113 @@ void dispose() {
       ),
     );
   }
+  // Add this method to your _PaymentsScreenState class
 
+Widget _buildTransferDetailRow(String label, String value) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 140,
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        Expanded(
+          child: SelectableText(
+            value,
+            style: const TextStyle(
+              fontSize: 15,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+  Widget _buildTransferPaymentInstructions() {
+  return Container(
+    margin: const EdgeInsets.symmetric(vertical: 12),
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: Colors.blue.shade50,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: Colors.blue.shade200),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.account_balance, color: Colors.blue.shade700),
+            const SizedBox(width: 8),
+            Text(
+              'Información para Transferencia Bancaria',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.blue.shade800,
+              ),
+            ),
+          ],
+        ),
+        const Divider(height: 24),
+        _buildTransferDetailRow('Banco:', 'Guayaquil'),
+        _buildTransferDetailRow('Número de cuenta:', '0016099966'),
+        _buildTransferDetailRow('Tipo de cuenta:', 'AHORRO'),
+        _buildTransferDetailRow('Nombre:', 'VACA GARCIA WILSON RICARDO'),
+        _buildTransferDetailRow('Cédula:', '0956746382'),
+        _buildTransferDetailRow('Email:', 'wilsonvaca16@gmail.com'),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.amber.shade50,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.amber.shade200),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.amber.shade800),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Instrucciones importantes:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.amber.shade800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Una vez realizada la transferencia, envíe su comprobante al número de teléfono +593962579977.',
+                style: TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'En un plazo de 1 a 2 días hábiles se creará su envío.',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
   Widget _buildProductsList() {
     if (_isLoadingProducts) {
       return const Center(
@@ -1252,13 +1376,7 @@ void dispose() {
                     children: [
                       Text(product.descripcion),
                       const SizedBox(height: 4),
-                      Text(
-                        'Cantidad: ${product.cantidad} - Peso: ${product.peso} kg',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.mutedTextColor,
-                        ),
-                      ),
+                      
                     ],
                   ),
                   secondary: Container(
@@ -1271,7 +1389,7 @@ void dispose() {
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Text(
-                      '\$${(product.precio * product.cantidad).toStringAsFixed(2)}',
+                      'PESO: ${(product.peso ).toStringAsFixed(2)} lb',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         color: AppTheme.primaryColor,

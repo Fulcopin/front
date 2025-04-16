@@ -474,59 +474,76 @@ Widget build(BuildContext context) {
     );
   }
 
-  Widget _buildRightPanel() {
-    return Container(
-      color: Colors.white,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 24, right: 24),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+  // ...existing code...
+
+Widget _buildRightPanel() {
+  return Container(
+    color: Colors.white,
+    child: Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 24, right: 24),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              _buildNavItem('Home', true),
+              _buildNavItem('About us', false),
+              _buildNavItem('Blog', false),
+              _buildNavItem('Pricing', false),
+            ],
+          ),
+        ),
+        Expanded(
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _buildNavItem('Home', true),
-                _buildNavItem('About us', false),
-                _buildNavItem('Blog', false),
-                _buildNavItem('Pricing', false),
+                // Use a Container with larger dimensions for the image
+                Container(
+                  width: 300,
+                  height: 300,
+                  decoration: BoxDecoration(
+                    // If you have an image asset:
+                    image: DecorationImage(
+                     image: AssetImage('assets/images/logo.jpeg'),
+                    //   fit: BoxFit.contain,
+                   ),
+                    // Or just a placeholder color for now:
+                    color: AppTheme.secondaryColor.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Center(
+                   
+                  ),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Servicio de courier confiable y rápido',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 48),
+                  child: Text(
+                    'Envía y recibe paquetes de manera segura con nuestro servicio premium de courier internacional.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppTheme.mutedTextColor,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
-          const Expanded(
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Placeholder(
-                    fallbackHeight: 200,
-                    fallbackWidth: 200,
-                  ),
-                  SizedBox(height: 24),
-                  Text(
-                    'Servicio de courier confiable y rápido',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 48),
-                    child: Text(
-                      'Envía y recibe paquetes de manera segura con nuestro servicio premium de courier internacional.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppTheme.mutedTextColor,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
+}
+
 
   Widget _buildNavItem(String title, bool isActive) {
     return Padding(

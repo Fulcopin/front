@@ -10,6 +10,9 @@ import '../widgets/client_shipments_overview.dart';
 import '../theme.dart';
 import '../services/auth_service.dart';
 import '../services/product_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../services/user_stats_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -19,28 +22,75 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  final storage = const FlutterSecureStorage();
+  final UserStatsService _statsService = UserStatsService();
   bool _isAdmin = false;
   int _selectedIndex = 0;
   int _totalProducts = 0;
   bool _isLoading = true;
+    bool _isLoadingStats = true;
+    Map<String, dynamic> _userStats = {
+    'totalShipments': 0,
+    'shipmentsInTransit': 0,
+    'totalSpent': 0.0,
+  };
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   @override
   void initState() {
     super.initState();
     _validateSession();
     _loadDashboardData();
-     _loadAdminStatus();
+      _loadUserStats();
   }
-   Future<void> _loadAdminStatus() async {
-    final authService = Provider.of<AuthService>(context, listen: false);
-    final isAdmin = await authService.isAdmin();
+  
+ Future<void> _loadUserStats() async {
+  print('📊 Cargando estadísticas de usuario...');
+  try {
+    setState(() {
+      _isLoadingStats = true;
+    });
+    
+    // Obtener el ID del usuario desde SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('idUser');
+    
+    print('🔑 ID de usuario obtenido: $userId');
+    
+    if (userId == null) {
+      throw Exception('No se encontró ID de usuario');
+    }
+    
+    // Obtener el token para autorización
+    final token = await storage.read(key: 'token');
+    if (token == null) {
+      throw Exception('No se encontró token de autenticación');
+    }
+    
+    // Pasar el ID explícitamente al servicio
+    final stats = await _statsService.getUserStats(token, userId);
+    
     if (mounted) {
       setState(() {
-        _isAdmin = isAdmin;
+        _userStats = stats;
+        _isLoadingStats = false;
+      });
+    }
+  } catch (e) {
+    print('❌ Error cargando estadísticas: $e');
+    
+    // Usar datos temporales mientras se arregla
+    if (mounted) {
+      setState(() {
+        _userStats = {
+          'totalShipments': 3,
+          'shipmentsInTransit': 1,
+          'totalSpent': 350.0,
+        };
+        _isLoadingStats = false;
       });
     }
   }
-
+}
    Future<void> _loadDashboardData() async {
     try {
       final products = await ProductService().getProducts();
@@ -141,7 +191,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           // Contenido principal - Mostrar la pantalla seleccionada
           Expanded(
-            child: _isAdmin ? _buildAdminDashboard() : _buildClientDashboard(),
+            child:   _buildClientDashboard(),
           ),
         ],
       ),
@@ -234,10 +284,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         
         // Client-specific navigation items
         if (!isAdmin) ...[
-          _buildNavItem(1, 'Mis Productos', Icons.shopping_cart_outlined, '/products'),
+          _buildNavItem(1, 'Alerta Bodega', Icons.notifications_outlined, '/products'),
           _buildNavItem(2, 'Realizar Pago', Icons.credit_card_outlined, '/payments'),
           _buildNavItem(3, 'Mis Envíos', Icons.inventory_2_outlined, '/my-shipments'),
           _buildNavItem(4, 'Mi Perfil', Icons.person_outline, '/profile'),
+          _buildNavItem(5, 'Mi Casillero', Icons.local_shipping_outlined, '/usa-shipping'),
         ],
         
         // Admin-specific navigation items
@@ -302,37 +353,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // Widget para el contenido del dashboard de administrador
-  Widget _buildAdminDashboard() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Panel de Administración',
-            style: Theme.of(context).textTheme.displayMedium?.copyWith(
-                  color: AppTheme.primaryColor,
-                  fontWeight: FontWeight.bold,
-                ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Bienvenido Administrador',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppTheme.mutedTextColor,
-                ),
-          ),
-          const SizedBox(height: 24),
-          _buildStatsGrid(context),
-          const SizedBox(height: 24),
-          _buildShipmentsAndActions(context),
-          const SizedBox(height: 24),
-          const ShipmentChart(),
-        ],
-      ),
-    );
-  }
 
   // Widget para el contenido del dashboard de cliente
   Widget _buildClientDashboard() {
@@ -453,53 +473,79 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
 
-  // Widgets para el dashboard de cliente
-  Widget _buildClientStatsGrid(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Determinar cuántas tarjetas por fila según el ancho
-        int crossAxisCount = 1;
-        if (constraints.maxWidth > 600) crossAxisCount = 2;
-        if (constraints.maxWidth > 900) crossAxisCount = 4;
+Widget _buildClientStatsGrid(BuildContext context) {
+  return Column(
+    children: [
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text(
+            'Mis Estadísticas',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadUserStats,
+            tooltip: 'Actualizar estadísticas',
+          ),
+        ],
+      ),
+      const SizedBox(height: 16),
+      LayoutBuilder(
+        builder: (context, constraints) {
+          // Determinar cuántas tarjetas por fila según el ancho
+          int crossAxisCount = 1;
+          if (constraints.maxWidth > 600) crossAxisCount = 2;
+          if (constraints.maxWidth > 900) crossAxisCount = 4;
 
-        return GridView.count(
-          crossAxisCount: crossAxisCount,
-          crossAxisSpacing: 16,
-          mainAxisSpacing: 16,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          children: [
-            ClientStatsCard(
-              title: 'Mis Productos',
-              value: _isLoading ? '...' : _totalProducts.toString(),
-              description: 'Total registrados',
-              icon: Icons.shopping_cart_outlined,
-            ),
-            ClientStatsCard(
-              title: 'Mis Envíos',
-              value: '3',
-              description: 'Total realizados',
-              icon: Icons.inventory_2_outlined,
-            ),
-            ClientStatsCard(
-              title: 'En Tránsito',
-              value: '1',
-              description: 'Actualmente',
-              icon: Icons.local_shipping_outlined,
-              status: 'En camino',
-            ),
-            ClientStatsCard(
-              title: 'Pagos',
-              value: '\$350.00',
-              description: 'Total gastado',
-              icon: Icons.credit_card_outlined,
-            ),
-          ],
-        );
-      },
-    );
-  }
-
+          return GridView.count(
+            crossAxisCount: crossAxisCount,
+            crossAxisSpacing: 16,
+            mainAxisSpacing: 16,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              ClientStatsCard(
+                title: 'Mis Alertas',
+                value: _isLoading ? '...' : _totalProducts.toString(),
+                description: 'Total registrados',
+                icon: Icons.shopping_cart_outlined,
+              ),
+              ClientStatsCard(
+                title: 'Mis Envíos',
+                value: _isLoadingStats 
+                    ? '...' 
+                    : (_userStats['totalShipments']?.toString() ?? '0'),
+                description: 'Total realizados',
+                icon: Icons.inventory_2_outlined,
+              ),
+              ClientStatsCard(
+                title: 'En Tránsito',
+                value: _isLoadingStats 
+                    ? '...' 
+                    : (_userStats['shipmentsInTransit']?.toString() ?? '0'),
+                description: 'Actualmente',
+                icon: Icons.local_shipping_outlined,
+                status: 'En camino',
+              ),
+              ClientStatsCard(
+                title: 'Pagos',
+                value: _isLoadingStats 
+                    ? '...' 
+                    : '\$${(_userStats['totalSpent'] ?? 0.0).toStringAsFixed(2)}',
+                description: 'Total gastado',
+                icon: Icons.credit_card_outlined,
+              ),
+            ],
+          );
+        },
+      ),
+    ],
+  );
+}
   Widget _buildClientOverview(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {

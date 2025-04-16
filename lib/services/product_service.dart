@@ -8,7 +8,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
 class ProductService {
-  final String baseUrl = 'http://localhost:5000';
+  final String baseUrl = 'https://proyect-currier.onrender.com';
   final _storage = const FlutterSecureStorage();
   // Datos simulados para productos
   final List<Product> _mockProducts = [
@@ -579,8 +579,134 @@ Future<List<Map<String, dynamic>>> getProductStatusHistory(String productId) asy
     rethrow;
   }
 }// Add this method right after your getAdminProducts method
-// Make sure your ProductService has this method
-// Add this method to get warehouse products for a specific user (admin view)
+
+// Add this method to your ProductService class
+Future<bool> sendEmailNotification({
+  required String email,
+  required String productName,
+  required String status,
+  String? additionalMessage,
+}) async {
+  try {
+    final token = await _storage.read(key: 'token');
+    if (token == null) {
+      throw Exception('Token no encontrado');
+    }
+
+    final authHeader = token.startsWith('Bearer ') ? token : 'Bearer $token';
+    
+    print('Sending email notification to: $email');
+    
+    // Create HTML content for the email
+    final htmlContent = '''
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 5px;">
+        <h2 style="color: #2c3e50; text-align: center;">Actualización de Estado</h2>
+        <p style="font-size: 16px; line-height: 1.5;">Estimado cliente,</p>
+        <p style="font-size: 16px; line-height: 1.5;">Le informamos que su producto "<strong>${productName}</strong>" ha cambiado su estado a:</p>
+        <p style="font-size: 18px; text-align: center; margin: 20px 0; padding: 10px; background-color: #f8f9fa; border-radius: 3px; color: #2c3e50;"><strong>${status}</strong></p>
+        ${additionalMessage != null ? '<p style="font-size: 16px; line-height: 1.5;">${additionalMessage}</p>' : ''}
+        <p style="font-size: 16px; line-height: 1.5;">Si tiene alguna pregunta, no dude en contactarnos.</p>
+        <p style="font-size: 16px; line-height: 1.5; margin-top: 30px;">Saludos cordiales,<br>Equipo de Alerta Bodega</p>
+      </div>
+    ''';
+
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/send-email'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authHeader,
+      },
+      body: json.encode({
+        'to': email,
+        'subject': 'Actualización: $productName',
+        'html': htmlContent,
+        'text': 'Su producto $productName ahora está en estado: $status. ${additionalMessage ?? ''}'
+      }),
+    );
+    
+    print('Email notification response: ${response.statusCode}');
+    
+    if (response.statusCode == 200) {
+      print('Email notification sent successfully');
+      return true;
+    } else {
+      print('Error sending email notification: ${response.body}');
+      return false;
+    }
+  } catch (e) {
+    print('Exception sending email notification: $e');
+    return false;
+  }
+}
+Future<Product> addProductAdmin(Product product) async {
+  try {
+    final token = await _storage.read(key: 'token');
+    
+    print('\n=== Admin Product Creation ===');
+    print('Token exists: ${token != null}');
+    
+    if (token == null || token.isEmpty) {
+      throw Exception('Token no encontrado');
+    }
+    
+    // Make sure token includes 'Bearer ' prefix if your auth middleware expects it
+    final authHeader = token.startsWith('Bearer ') ? token : 'Bearer $token';
+    
+    final requestData = {
+      'nombre': product.nombre,
+      'descripcion': product.descripcion,
+      'peso': product.peso,
+      'precio': product.precio,
+      'cantidad': product.cantidad,
+      'link': product.link,
+      'imagenUrl': product.imagenUrl,
+      'facturaUrl': product.facturaUrl,
+      'id_user': product.id_user  // This is needed but handled by backend via req.user.id
+    };
+    
+    print('Sending data: ${json.encode(requestData)}');
+    
+    final response = await http.post(
+      Uri.parse('$baseUrl/admin/RegistrarProductos'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authHeader,
+        
+      },
+      body: json.encode(requestData),
+    );
+    
+    print('Response status: ${response.statusCode}');
+    print('Response body: ${response.body}');
+    final prefs = await SharedPreferences.getInstance();
+      final role = prefs.getString('userRole') ?? await _storage.read(key: 'role');
+      if (role != 'ADMIN') {
+        throw Exception('No tienes permisos de administrador');
+      }
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      final data = json.decode(response.body);
+      return Product(
+        id:  '',
+        id_user: product.id_user,
+        nombre: product.nombre,
+        descripcion: product.descripcion,
+        peso: product.peso,
+        precio: product.precio,
+        cantidad: product.cantidad,
+        link: product.link,
+        imagenUrl: product.imagenUrl,
+        facturaUrl: product.facturaUrl,
+        fechaCreacion: product.fechaCreacion,
+        estado: data['estado'] ?? 'No llegado',
+      );
+    }
+    
+    throw Exception('Error del servidor: ${response.statusCode} - ${response.body}');
+  } catch (e) {
+    print('Error in addProductAdmin (detailed): $e');
+    rethrow;
+  }
+}
 Future<List<Map<String, dynamic>>> getWarehouseProductsByUser(String userId, {required String token}) async {
   try {
     print('Fetching warehouse products for user: $userId');
@@ -740,7 +866,42 @@ Future<bool> updateProductStatusAsUser(String productId, String newStatus) async
   }
 }
 
-
+// Add to your ProductService class
+Future<bool> updateProduct(Product product) async {
+  try {
+    final token = await _storage.read(key: 'token');
+    if (token == null || token.isEmpty) {
+      throw Exception('Token no encontrado');
+    }
+    
+    final authHeader = token.startsWith('Bearer ') ? token : 'Bearer $token';
+    
+    final response = await http.put(
+      Uri.parse('$baseUrl/admin/productos/${product.id}'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': authHeader,
+      },
+      body: json.encode({
+        'nombre': product.nombre,
+        'descripcion': product.descripcion,
+        'peso': product.peso,
+        'precio': product.precio,
+        'cantidad': product.cantidad,
+        'link': product.link,
+      }),
+    );
+    
+    if (response.statusCode == 200) {
+      return true;
+    }
+    
+    throw Exception('Error al actualizar producto: ${response.statusCode} - ${response.body}');
+  } catch (e) {
+    print('Error en updateProduct: $e');
+    rethrow;
+  }
+}
 // Método para marcar productos como pagados usando la ruta de usuario
 Future<bool> markProductsAsPaidAsUser(List<String> productIds) async {
   bool allSuccessful = true;

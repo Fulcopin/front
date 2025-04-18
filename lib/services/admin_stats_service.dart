@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class AdminStatsService {
-  final String baseUrl ="https://proyect-currier.onrender.com";
+  final String baseUrl ="http://localhost:5000";
   final _storage = const FlutterSecureStorage();
 
   Future<Map<String, dynamic>> getAdminStats() async {

@@ -11,7 +11,7 @@ import './image_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:math';
 class ApiConfig {
-  static const String baseUrl = 'https://proyect-currier.onrender.com'; 
+  static const String baseUrl = 'http://localhost:5000'; 
 }
 class ShipmentService {
   final _storage = FlutterSecureStorage();
@@ -472,7 +472,7 @@ Future<Map<String, dynamic>> registerShipment({
       'direccion': direccion ?? "guaya",
       'pagoId': pagoId,
       'origen': origen,
-      'fechaEstimada': DateTime.now().add(const Duration(days: 7)).toIso8601String(),
+      'fechaEstimada': DateTime.now().add(const Duration(days: 25)).toIso8601String(),
       'productos':productIds,
     };
     

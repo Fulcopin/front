@@ -8,7 +8,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
 class ProductService {
-  final String baseUrl = 'https://proyect-currier.onrender.com';
+  final String baseUrl = 'http://localhost:5000';
   final _storage = const FlutterSecureStorage();
   // Datos simulados para productos
   final List<Product> _mockProducts = [
@@ -93,18 +93,19 @@ class ProductService {
   Future<Map<String, dynamic>> generateCardPayment({
   required double subtotal,
   required String clientTransactionId,
+  String? token,
 }) async {
   try {
-    // 1. Obtener token y verificar token
-    final token = await _storage.read(key: 'token');
-    if (token == null) {
-      throw Exception('Token no encontrado');
+      String? authToken = token;
+    if (authToken == null) {
+      authToken = await _storage.read(key: 'token');
+      if (authToken == null) {
+        throw Exception('Token no encontrado');
+      }
     }
 
-    // 2. Enviar el token exactamente como está almacenado, sin añadir 'Bearer '
-    final authHeader = token; // Enviar token sin modificar
-    
-    print('Token usado: $authHeader');
+    // 2. Imprimir información del token para diagnóstico
+    print('Token usado (longitud: ${authToken.length}): ${authToken.substring(0, min(30, authToken.length))}...');
     
    
     // 4. Crear la petición con el token sin modificar
@@ -112,7 +113,7 @@ class ProductService {
       Uri.parse('$baseUrl/user/GenerarPago'),
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': authHeader, // Usar el token tal cual está almacenado
+        'Authorization': authToken, // Usar el token tal cual está almacenado
       },
       body: jsonEncode({
         'ClientTransactionID': clientTransactionId,

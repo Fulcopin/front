@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 
 
 class UserStatsService {
-  final String baseUrl ="https://proyect-currier.onrender.com";
+  final String baseUrl ="http://localhost:5000";
 
 
   Future<Map<String, dynamic>> getUserStats(String token, String userId) async {

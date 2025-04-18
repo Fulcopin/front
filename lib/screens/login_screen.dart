@@ -436,18 +436,7 @@ Widget build(BuildContext context) {
                 const SizedBox(height: 16),
                 SizedBox(
                   width: 400,
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      // Lógica para iniciar sesión con Gmail
-                    },
-                    icon: const Icon(Icons.mail_outline),
-                    label: const Text('Iniciar sesión con Gmail'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.black87,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                  ),
+                 
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
@@ -485,12 +474,7 @@ Widget _buildRightPanel() {
           padding: const EdgeInsets.only(top: 24, right: 24),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              _buildNavItem('Home', true),
-              _buildNavItem('About us', false),
-              _buildNavItem('Blog', false),
-              _buildNavItem('Pricing', false),
-            ],
+            
           ),
         ),
         Expanded(

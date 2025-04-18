@@ -522,11 +522,25 @@ Future<void> _processCardPayment() async {
 
   try {
     print('Enviando monto para pago: $exactAmount');
-    
-    // Enviar ID generado a la API
+    String? token = await storage.read(key: 'token');
+  if (token == null) {
+    final prefs = await SharedPreferences.getInstance();
+    token = prefs.getString('token');
+  }
+  
+  if (token == null || token.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('No se encontró el token de autenticación. Por favor inicie sesión nuevamente.'))
+    );
+   
+    return;
+  }
+  
+ 
     final result = await _productService.generateCardPayment(
       subtotal: finul,
-      clientTransactionId: clientTransactionId  
+      clientTransactionId: clientTransactionId  ,
+      token: token,
     );
     
     setState(() {

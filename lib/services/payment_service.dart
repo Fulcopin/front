@@ -32,7 +32,7 @@ class PaymentMethod {
 }
 
 class PaymentService {
-  final String baseUrl = 'hhttps://proyect-currier.onrender.com';
+  final String baseUrl = 'http://localhost:5000';
   final _storage = const FlutterSecureStorage();
   
   // Stream controllers for reactive data

@@ -5,7 +5,7 @@ import '../services/shipment_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-// Add this import at the top of your file:
+import '../services/user_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 class AdminShipmentScreen extends StatefulWidget {
@@ -151,7 +151,307 @@ Future<void> _updateShipmentStatus(String shipmentId, String newStatus) async {
     );
   }
 }
-
+// Función mejorada para enviar notificación de WhatsApp con datos completos del usuario
+Future<void> _sendWhatsAppNotificationWithUserData(Map<String, dynamic> shipment) async {
+  try {
+    // Mostrar indicador de carga
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        title: Text('Obteniendo datos del cliente...'),
+        content: SizedBox(
+          height: 100,
+          child: Center(
+            child: CircularProgressIndicator(),
+          ),
+        ),
+      ),
+    );
+    
+    // Extraer el ID del usuario del envío - ESTA ES LA PARTE CRÍTICA
+    String? userId;
+    
+    // Verificar todas las posibles ubicaciones del ID de usuario en el objeto de envío
+    if (shipment['usuario'] != null) {
+      if (shipment['usuario'] is Map) {
+        userId = shipment['usuario']['id']?.toString();
+        print('ID de usuario encontrado en shipment.usuario.id: $userId');
+      } else if (shipment['usuario'] is String) {
+        userId = shipment['usuario'].toString();
+        print('ID de usuario encontrado en shipment.usuario (string): $userId');
+      }
+    }
+    
+    // Si no lo encontramos arriba, buscar en otras posibles ubicaciones
+    if (userId == null || userId.isEmpty) {
+      userId = shipment['userId']?.toString() ?? 
+               shipment['idUsuario']?.toString() ?? 
+               shipment['user_id']?.toString() ??
+               shipment['id_usuario']?.toString();
+      
+      print('ID de usuario encontrado en otra propiedad: $userId');
+    }
+    
+    // Imprimir todo el objeto shipment para diagnóstico
+    print('Objeto shipment completo: ${shipment.toString()}');
+    
+    // Si no hemos encontrado el ID aún, intentar extraerlo de un campo específico o referencia
+    if (userId == null || userId.isEmpty) {
+      // Buscar en campos de referencia que puedan contener el ID del usuario
+      final possibleRefs = [
+        'usuarioRef', 'clienteRef', 'userRef', 'referencia_usuario',
+        'cliente', 'cliente_id', 'user', 'customer'
+      ];
+      
+      for (final field in possibleRefs) {
+        if (shipment[field] != null) {
+          print('Posible referencia encontrada en campo $field: ${shipment[field]}');
+          if (shipment[field] is String) {
+            userId = shipment[field].toString();
+            print('Usando referencia como ID: $userId');
+            break;
+          } else if (shipment[field] is Map && shipment[field]['id'] != null) {
+            userId = shipment[field]['id'].toString();
+            print('Usando ID de objeto referenciado: $userId');
+            break;
+          }
+        }
+      }
+    }
+    
+    // Si aún no encontramos un ID, usar un ID específico para pruebas
+    if (userId == null || userId.isEmpty) {
+      userId = 'nulo'; // ID específico para pruebas
+      print('No se encontró ID de usuario en el envío, usando ID de prueba: $userId');
+    }
+    
+    // Obtener datos completos del usuario
+    final userData = await _getUserDataById(userId);
+    
+    // Cerrar diálogo de carga
+    Navigator.pop(context);
+    
+    if (userData == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudieron obtener los datos del cliente'))
+      );
+      return;
+    }
+    
+    // Extraer información del envío
+    final trackingNumber = shipment['numeroSeguimiento']?.toString() ?? 
+                         shipment['tracking']?.toString() ??
+                         shipment['id']?.toString() ?? 
+                         'No disponible';
+                         
+    final status = shipment['status']?.toString() ?? 
+                shipment['Estado']?.toString() ?? 
+                shipment['estado']?.toString() ?? 
+                'Procesando';
+    
+    // Extraer información del usuario
+    final nombre = userData['nombre']?.toString() ?? '';
+    final apellido = userData['apellido']?.toString() ?? '';
+    final telefono = userData['telefono']?.toString() ?? '';
+    final direccion = userData['direccion']?.toString() ?? '';
+    final ciudad = userData['ciudad']?.toString() ?? '';
+    final pais = userData['pais']?.toString() ?? '';
+    
+    // Formatear nombre completo
+    final clientName = [nombre, apellido].where((part) => part != null && part.isNotEmpty).join(' ');
+    
+    // Verificar si tenemos un número de teléfono
+    if (telefono.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('El cliente no tiene un número de teléfono registrado'))
+      );
+      return;
+    }
+    
+    // Formatear dirección completa
+    final addressParts = [direccion, ciudad, pais]
+        .where((part) => part != null && part.isNotEmpty)
+        .toList();
+    final fullAddress = addressParts.join(', ');
+    
+    // Mostrar diálogo de confirmación
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.chat, color: Color(0xFF25D366), size: 28),
+            const SizedBox(width: 10),
+            const Text('Notificar por WhatsApp'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ID del usuario (para verificación)
+              Text('ID Usuario: $userId', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              SizedBox(height: 8),
+              
+              // Datos del cliente
+              Text('Cliente:', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text(clientName),
+              SizedBox(height: 8),
+              
+              // Teléfono
+              Text('Teléfono:', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text(telefono),
+              SizedBox(height: 8),
+              
+              // Dirección
+              Text('Dirección:', style: TextStyle(fontWeight: FontWeight.bold)),
+              Text(fullAddress),
+              SizedBox(height: 12),
+              
+              Divider(),
+              SizedBox(height: 8),
+              
+              // Información del envío
+              Text('Detalles del envío:', style: TextStyle(fontWeight: FontWeight.bold)),
+              SizedBox(height: 4),
+              Text('Tracking: $trackingNumber'),
+              Text('Estado: ${_getStatusDisplayName(status)}', style: TextStyle(color: Colors.green)),
+              SizedBox(height: 12),
+              
+              Text('¿Desea enviar una notificación a este cliente sobre el estado de su envío?'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton.icon(
+            icon: Icon(Icons.chat, color: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF25D366), // WhatsApp green color
+              foregroundColor: Colors.white,
+            ),
+            label: const Text('Enviar notificación'),
+            onPressed: () {
+              Navigator.pop(context);
+              
+              // Enviar notificación WhatsApp con toda la información
+              _sendWhatsAppMessage(
+                telefono: telefono,
+                clientName: clientName.isNotEmpty ? clientName : 'Cliente',
+                trackingNumber: trackingNumber,
+                status: status,
+                address: fullAddress,
+                shipmentId: shipment['id']?.toString() ?? '',
+                 userId: userId ?? '',   // Incluir ID de usuario para registro
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  } catch (e) {
+    // Cerrar diálogo de carga si hay error
+    Navigator.pop(context);
+    
+    print('Error en notificación WhatsApp: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error: $e'))
+    );
+  }
+}
+// Función para enviar mensaje de WhatsApp con información completa del usuario y envío
+Future<void> _sendWhatsAppMessage({
+  required String telefono,
+  required String clientName,
+  required String trackingNumber,
+  required String status,
+  required String address,
+  required String shipmentId,
+  required String userId,
+}) async {
+  try {
+    // Formatear el número de teléfono
+    String formattedPhone = _formatPhoneNumber(telefono);
+    
+    print('Enviando WhatsApp a: $formattedPhone');
+    print('Cliente: $clientName');
+    print('Tracking: $trackingNumber');
+    print('Estado: $status');
+    
+    // Crear el mensaje personalizado
+    String message = '¡Hola $clientName! Tu envío con tracking: $trackingNumber ha sido actualizado a estado: *${_getStatusDisplayName(status)}*. ';
+    
+    // Añadir información de dirección si está disponible
+    if (address.isNotEmpty) {
+      message += 'Dirección de entrega: $address. ';
+    }
+    
+    // Agregar mensaje final
+    message += 'Gracias por usar nuestros servicios de VACABOX.';
+    
+    // Codificar el mensaje para URL
+    String encodedMessage = Uri.encodeComponent(message);
+    
+    // Crear URL de WhatsApp
+    String whatsappUrl = 'https://wa.me/$formattedPhone?text=$encodedMessage';
+    
+    print('URL de WhatsApp: $whatsappUrl');
+    
+    // Abrir WhatsApp
+    final Uri url = Uri.parse(whatsappUrl);
+    
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      throw Exception('No se pudo abrir WhatsApp');
+    }
+    
+    // Registrar que se envió la notificación
+    await _logNotificationSent(shipmentId, formattedPhone, status, clientName);
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Abriendo WhatsApp para enviar notificación...'))
+    );
+  } catch (e) {
+    print('Error enviando mensaje de WhatsApp: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error al enviar notificación: $e'))
+    );
+  }
+}
+// Función para obtener los datos completos del usuario usando el servicio existente
+Future<Map<String, dynamic>?> _getUserDataById(String userId) async {
+  try {
+    print('Obteniendo datos del usuario con ID: $userId');
+    
+    // Obtener el token de autenticación
+    final storage = FlutterSecureStorage();
+    final token = await storage.read(key: 'token');
+    
+    if (token == null) {
+      print('Error: No se encontró token de autenticación');
+      return null;
+    }
+    
+    // Usar el servicio existente para obtener los detalles del usuario
+    UserService userService = UserService();
+    final userData = await userService.getUserDetails(userId, token: token);
+    
+    if (userData != null && userData['success'] == true && userData['usuario'] != null) {
+      print('Datos del usuario obtenidos correctamente');
+      return userData['usuario'];
+    } else {
+      print('No se encontraron datos del usuario');
+      return null;
+    }
+  } catch (e) {
+    print('Error obteniendo datos del usuario: $e');
+    return null;
+  }
+}
 void _showWhatsAppNotificationDialog(Map<String, dynamic> shipment) async {
   // Get client name from shipment
   final clientName = shipment['userName'] ?? 'Cliente';
@@ -173,131 +473,140 @@ void _showWhatsAppNotificationDialog(Map<String, dynamic> shipment) async {
     return;
   }
 
-  showDialog(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Row(
-        children: [
-          Icon(Icons.chat, color: Color(0xFF25D366), size: 28),
-          const SizedBox(width: 10),
-          const Text('Notificar por WhatsApp'),
-        ],
-      ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('¿Desea notificar a $clientName sobre el cambio de estado?'),
-          const SizedBox(height: 10),
-          Text('Número: $phoneNumber', style: const TextStyle(fontWeight: FontWeight.bold)),
-          Text('Tracking: $trackingNumber', style: const TextStyle(fontWeight: FontWeight.bold)),
-          Text('Nuevo estado: ${_getStatusDisplayName(status)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancelar'),
-        ),
-        ElevatedButton.icon(
-          icon: Icon(Icons.chat, color: Colors.white),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF25D366), // WhatsApp green color
-            foregroundColor: Colors.white,
-          ),
-          label: const Text('Enviar mensaje'),
-          onPressed: () {
-            Navigator.pop(context);
-            _sendWhatsAppNotification(
-              phoneNumber,
-              trackingNumber,
-              status,
-              clientName,
-            );
-          },
-        ),
-        ElevatedButton.icon(
-          icon: Icon(Icons.chat, color: Colors.white),
-          label: Text('Notificar'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF25D366),
-            foregroundColor: Colors.white,
-          ),
-          onPressed: () {
-            Navigator.pop(context);
-            _showWhatsAppNotificationDialog(shipment);
-          },
+  // Fix 1: Remove one of the duplicate buttons
+// Fix 2: Add proper implementation of _sendWhatsAppNotification with string parameters
 
-        ),
-        ElevatedButton(
-          onPressed: () {
-            Navigator.pop(context);
-            _showStatusChangeDialog(
-              shipment['id'],
-              shipment['status'] ?? 
-              shipment['Estado'] ?? 
-              shipment['estado'] ?? 
-              'Procesando'
-            );
-          },
-          child: Text('Cambiar Estado'),
-        ),
-        
+showDialog(
+  context: context,
+  builder: (context) => AlertDialog(
+    title: Row(
+      children: [
+        Icon(Icons.chat, color: Color(0xFF25D366), size: 28),
+        const SizedBox(width: 10),
+        const Text('Notificar por WhatsApp'),
       ],
     ),
-  );
-}
-// Send WhatsApp notification
-void _sendWhatsAppNotification(String phoneNumber, String trackingNumber, String status, String clientName) {
-  // Format the phone number (remove any non-digit characters and ensure it has Ecuador country code)
-  String formattedNumber = phoneNumber.replaceAll(RegExp(r'[^\d+]'), '');
-  if (!formattedNumber.startsWith('+')) {
-    // Add Ecuador country code if missing
-    formattedNumber = '+593$formattedNumber';
-  }
-  
-  // Create the message
-  final statusName = _getStatusDisplayName(status);
-  final message = 'Hola $clientName, su pedido con número de tracking $trackingNumber ha sido actualizado a estado: $statusName. Por favor revise su estado en la aplicación.';
-  
-  // URL encode the message
-  final encodedMessage = Uri.encodeComponent(message);
-  
-  // Create the WhatsApp URL
-  final whatsappUrl = 'https://wa.me/$formattedNumber?text=$encodedMessage';
-  
-  // Launch the URL
-  launchUrl(Uri.parse(whatsappUrl), mode: LaunchMode.externalApplication).then((success) {
-    if (!success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo abrir WhatsApp. Verifique que esté instalado.'),
-          backgroundColor: Colors.red,
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('¿Desea notificar a $clientName sobre el cambio de estado?'),
+        const SizedBox(height: 10),
+        Text('Número: $phoneNumber', style: const TextStyle(fontWeight: FontWeight.bold)),
+        Text('Tracking: $trackingNumber', style: const TextStyle(fontWeight: FontWeight.bold)),
+        Text('Nuevo estado: ${_getStatusDisplayName(status)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancelar'),
+      ),
+      ElevatedButton.icon(
+        icon: Icon(Icons.chat, color: Colors.white),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF25D366), // WhatsApp green color
+          foregroundColor: Colors.white,
         ),
-      );
-    }
-  });
+        label: const Text('Enviar mensaje'),
+        onPressed: () {
+          Navigator.pop(context);
+          _sendWhatsAppNotificationSimple(
+            phoneNumber,
+            trackingNumber,
+            status,
+            clientName,
+            shipmentId: shipment['id']?.toString() ?? '',
+          );
+        },
+      ),
+      ElevatedButton(
+        onPressed: () {
+          Navigator.pop(context);
+          _showStatusChangeDialog(
+            shipment['id'],
+            shipment['status'] ?? 
+            shipment['Estado'] ?? 
+            shipment['estado'] ?? 
+            'Procesando'
+          );
+        },
+        child: Text('Cambiar Estado'),
+      ),
+    ],
+  ),
+);
 }
 
-// Helper method to get a user-friendly status name
+// Add this new method to handle direct string parameters
+Future<void> _sendWhatsAppNotificationSimple(
+  String phoneNumber,
+  String trackingNumber,
+  String status,
+  String clientName,
+  {required String shipmentId}
+) async {
+  try {
+    // Formatear el número de teléfono
+    String formattedPhone = _formatPhoneNumber(phoneNumber);
+    
+    // Crear el mensaje personalizado
+    String message = '¡Hola $clientName! Tu envío con tracking: $trackingNumber ha sido actualizado a estado: *$status*. ';
+    
+    // Agregar mensaje final
+    message += 'Gracias por usar nuestros servicios de VACABOX.';
+    
+    // Codificar el mensaje para URL
+    String encodedMessage = Uri.encodeComponent(message);
+    
+    // Crear URL de WhatsApp
+    String whatsappUrl = 'https://wa.me/$formattedPhone?text=$encodedMessage';
+    
+    // Abrir WhatsApp
+    final Uri url = Uri.parse(whatsappUrl);
+    
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      throw Exception('No se pudo abrir WhatsApp');
+    }
+    
+    // Registrar que se envió la notificación
+    await _logNotificationSent(shipmentId, formattedPhone, status, clientName);
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Abriendo WhatsApp para enviar notificación...'))
+    );
+  } catch (e) {
+    print('Error enviando notificación WhatsApp: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error al enviar notificación: $e'))
+    );
+  }
+}
+
+// Add helper method for status display names if it doesn't exist
 String _getStatusDisplayName(String status) {
-  switch (status.toUpperCase()) {
-    case 'RECEIVED':
-      return 'Recibido';
-    case 'IN_TRANSIT':
+  switch (status.toLowerCase()) {
+    case 'procesando':
+      return 'Procesando';
+    case 'en tránsito':
+    case 'en transito':
       return 'En tránsito';
-    case 'CUSTOMS':
+    case 'en bodega':
+      return 'En bodega';
+    case 'en aduana':
       return 'En aduana';
-    case 'READY_FOR_PICKUP':
-      return 'Listo para recoger';
-    case 'DELIVERED':
+    case 'en país destino':
+    case 'en pais destino':
+      return 'En país destino';
+    case 'en ruta entrega':
+      return 'En ruta para entrega';
+    case 'entregado':
       return 'Entregado';
     default:
       return status;
   }
 }
 
-// Add this button to your UI where you display shipment information
 Widget _buildWhatsAppButton(Map<String, dynamic> shipment) {
   return ElevatedButton.icon(
     icon: const Icon(Icons.chat, color: Colors.white),
@@ -420,7 +729,177 @@ void _showShipmentDetails(Map<String, dynamic> shipment) {
   );
 }
 
-// Helper methods for the shipment details dialog
+// Función mejorada para enviar mensaje de WhatsApp
+Future<void> _sendWhatsAppNotification(Map<String, dynamic> shipment, String newStatus) async {
+  try {
+    // Obtener ID del envío
+    String shipmentId = shipment['id']?.toString() ?? 
+                      shipment['Id']?.toString() ?? 
+                      shipment['ID']?.toString() ?? 
+                      'No disponible';
+    
+    // Obtener el ID del usuario asociado al envío
+    String? userId = shipment['userId']?.toString() ?? 
+                   shipment['idUsuario']?.toString() ?? 
+                   shipment['user_id']?.toString();
+                   
+    if (userId == null || userId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se encontró ID de usuario para este envío'))
+      );
+      return;
+    }
+    
+    // Obtener los datos del usuario desde SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Estos son los datos que están guardados en SharedPreferences según tu código
+    String nombre = prefs.getString('name') ?? '';
+    String apellido = prefs.getString('apellido') ?? '';
+    String? telefonoRaw = prefs.getString('telefono');
+    String telefono = telefonoRaw ?? '';
+    String direccion = shipment['direccion']?.toString() ?? 
+                      prefs.getString('userAddress') ?? 
+                      'Dirección no disponible';
+    String ciudad = prefs.getString('userCity') ?? '';
+    String pais = prefs.getString('userCountry') ?? '';
+    
+    // Verificar si tenemos el número de teléfono
+    if (telefono.isEmpty) {
+      // Si no tenemos el teléfono, intentar buscarlo en el objeto shipment
+      telefono = shipment['telefono']?.toString() ?? 
+                shipment['phone']?.toString() ?? 
+                '';
+      
+      if (telefono.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se encontró número de teléfono para este cliente'))
+        );
+        return;
+      }
+    }
+    
+    // Formatear el nombre completo del cliente
+    String fullName = '';
+    if (nombre.isNotEmpty) {
+      fullName = nombre;
+      if (apellido.isNotEmpty) {
+        fullName += ' $apellido';
+      }
+    } else {
+      fullName = 'Cliente';
+    }
+    
+    // Formatear el número de teléfono
+    String formattedPhone = _formatPhoneNumber(telefono);
+    
+    // Crear el mensaje personalizado
+    String message = '¡Hola $fullName! Tu envío con ID: $shipmentId ha sido actualizado a estado: *$newStatus*. ';
+    
+    // Añadir dirección de entrega si está disponible
+    if (direccion.isNotEmpty) {
+      final addressParts = <String>[];
+      if (direccion.isNotEmpty) addressParts.add(direccion);
+      if (ciudad.isNotEmpty) addressParts.add(ciudad);
+      if (pais.isNotEmpty) addressParts.add(pais);
+      
+      String fullAddress = addressParts.join(', ');
+          
+      if (fullAddress.isNotEmpty) {
+        message += 'Dirección de entrega: $fullAddress. ';
+      }
+    }
+    
+    message += 'Gracias por usar nuestros servicios de VACABOX.';
+    
+    // Codificar el mensaje para URL
+    String encodedMessage = Uri.encodeComponent(message);
+    
+    // Crear URL de WhatsApp
+    String whatsappUrl = 'https://wa.me/$formattedPhone?text=$encodedMessage';
+    
+    // Abrir WhatsApp
+    final Uri url = Uri.parse(whatsappUrl);
+    
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      throw Exception('No se pudo abrir WhatsApp');
+    }
+    
+    // Registrar que se envió la notificación
+    await _logNotificationSent(shipmentId, formattedPhone, newStatus, fullName);
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Abriendo WhatsApp para enviar notificación...'))
+    );
+  } catch (e) {
+    print('Error enviando notificación WhatsApp: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error al enviar notificación: $e'))
+    );
+  }
+}
+
+// Función para formatear el número de teléfono para WhatsApp
+String _formatPhoneNumber(String phone) {
+  // Eliminar caracteres no numéricos
+  String cleanPhone = phone.replaceAll(RegExp(r'[^\d]'), '');
+  
+  // Si el teléfono está vacío, devolver valor por defecto
+  if (cleanPhone.isEmpty) {
+    return '593999999999'; // Número predeterminado para evitar errores
+  }
+  
+  // Asegurar que tenga código de país (Ecuador = 593)
+  if (cleanPhone.length == 10 && cleanPhone.startsWith('0')) {
+    // Número ecuatoriano que comienza con 0, reemplazar con 593
+    return '593' + cleanPhone.substring(1);
+  } else if (cleanPhone.length == 10 && !cleanPhone.startsWith('0')) {
+    // Número sin código de país, añadir 593
+    return '593' + cleanPhone;
+  } else if (cleanPhone.length == 9) {
+    // Número ecuatoriano sin el 0 inicial, añadir 593
+    return '593' + cleanPhone;
+  }
+  
+  // Si ya tiene código de país u otro formato, devolverlo tal cual
+  return cleanPhone;
+}
+
+// Función para registrar que se envió una notificación
+Future<void> _logNotificationSent(
+  String shipmentId, 
+  String phone, 
+  String status, 
+  String clientName
+) async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final notificationsKey = 'whatsapp_notifications';
+    
+    // Obtener historial existente o crear uno nuevo
+    List<String> notifications = prefs.getStringList(notificationsKey) ?? [];
+    
+    // Crear registro con formato timestamp|shipmentId|phone|status|clientName
+    String timestamp = DateTime.now().toIso8601String();
+    String logEntry = '$timestamp|$shipmentId|$phone|$status|$clientName';
+    
+    // Agregar al historial
+    notifications.add(logEntry);
+    
+    // Limitar tamaño del historial si es muy grande
+    if (notifications.length > 100) {
+      notifications = notifications.sublist(notifications.length - 100);
+    }
+    
+    // Guardar historial actualizado
+    await prefs.setStringList(notificationsKey, notifications);
+    
+    print('Notificación registrada: $logEntry');
+  } catch (e) {
+    print('Error registrando notificación: $e');
+  }
+}
+
 Widget _detailRow(String label, String value) {
   return Padding(
     padding: EdgeInsets.symmetric(vertical: 4),
@@ -590,152 +1069,163 @@ Widget _buildShipmentsSection() {
                   : SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: DataTable(
-                        columns: [
-                          DataColumn(label: Text('ID')),
-                          DataColumn(label: Text('Tracking')),
-                          DataColumn(label: Text('Cliente')),
-                          DataColumn(label: Text('Origen')),
-                          DataColumn(label: Text('Destino')),
-                          DataColumn(label: Text('Fecha')), // This column needs a cell
-                          DataColumn(label: Text('Estado')),
-                          DataColumn(label: Text('Acciones')),
-                        ],
-                        rows: _shipments.map((shipment) {
-                          return DataRow(
-                            cells: [
-                              // Cell 1: ID
-                              DataCell(
-                                Text(
-                                  shipment['id'] ?? '',
-                                  style: TextStyle(fontSize: 12),
-                                ),
-                              ),
-                              // Cell 2: Tracking
-                              DataCell(
-                              Container(
-                                
-                                child: Tooltip(
-                                  message: shipment['numeroSeguimiento'] ?? 'Sin tracking',
-                                  child: SelectableText(
-                                    shipment['numeroSeguimiento'] ?? 'Sin tracking',
-                                    style: TextStyle(overflow: TextOverflow.ellipsis),
-                                  ),
-                                ),
-                              ),
-                            ),
-                              // Cell 3: Cliente
-                              DataCell(
-                                Text(
-                                  shipment['usuario']['nombre'] ?? 
-                                  shipment['nombreUsuario'] ?? 
-                                  'Usuario',
-                                ),
-                              ),
-                              // Cell 4: Origen
-                              DataCell(
-                                Text(
-                                  shipment['origin'] ?? 
-                                  shipment['Origen'] ?? 
-                                  'Miami, FL',
-                                ),
-                              ),
-                              // Cell 5: Destino
-                              DataCell(
-                                Text(
-                                  shipment['destination'] ?? 
-                                  shipment['direccion'] ?? 
-                                  'No disponible',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              // Cell 6: Fecha (was missing)
-                              DataCell(
-                                Text(
-                                  _formatDate(
-                                    shipment['fecha'] ?? 
-                                    shipment['Fecha'] ?? 
-                                    DateTime.now()
-                                  ),
-                                ),
-                              ),
-                              // Cell 7: Estado
-                              DataCell(
-                                Container(
-                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: _getStatusColor(
-                                      shipment['status'] ?? 
-                                      shipment['Estado'] ?? 
-                                      shipment['estado'] ?? 
-                                      'Procesando'
-                                    ),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Text(
-                                    shipment['status'] ??
-                                    shipment['Estado'] ?? 
-                                    shipment['estado'] ?? 
-                                    'Procesando',
-                                    style: TextStyle(fontSize: 12),
-                                  ),
-                                ),
-                              ),
-                              // Cell 8: Acciones (keep the PopupMenuButton here)
-                              DataCell(
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      icon: Icon(Icons.visibility, size: 20),
-                                      onPressed: () {
-                                        _showShipmentDetails(shipment);
-                                      },
-                                      tooltip: 'Ver detalles',
-                                    ),
-                                    PopupMenuButton<String>(
-                                      onSelected: (String value) {
-                                        _updateShipmentStatus(shipment['id'], value);
-                                      },
-                                      itemBuilder: (BuildContext context) => [
-                                        PopupMenuItem(
-                                          value: 'Procesando',
-                                          child: Text('Procesando'),
-                                        ),
-                                        PopupMenuItem(
-                                          value: 'En bodega',
-                                          child: Text('En bodega'),
-                                        ),
-                                        PopupMenuItem(
-                                          value: 'En tránsito',
-                                          child: Text('En tránsito Miami'),
-                                        ),
-                                        PopupMenuItem(
-                                          value: 'En aduana',
-                                          child: Text('En aduana ecuador'),
-                                        ),
-                                        PopupMenuItem(
-                                          value: 'En país destino',
-                                          child: Text('En Ecuador'),
-                                        ),
-                                        PopupMenuItem(
-                                          value: 'En ruta entrega',
-                                          child: Text('En ruta entrega'),
-                                        ),
-                                        PopupMenuItem(
-                                          value: 'Entregado',
-                                          child: Text('Entregado'),
-                                        ),
-                                      ],
-                                      icon: Icon(Icons.edit, size: 20),
-                                      tooltip: 'Cambiar estado',
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          );
-                        }).toList(),
-                      ),
+  columns: [
+    DataColumn(label: Text('ID')),
+    DataColumn(label: Text('Tracking')),
+    DataColumn(label: Text('Cliente')),
+    DataColumn(label: Text('Origen')),
+    DataColumn(label: Text('Destino')),
+    DataColumn(label: Text('Fecha')),
+    DataColumn(label: Text('Estado')),
+    DataColumn(label: Text('Notificar')), // Nueva columna para notificación
+    DataColumn(label: Text('Acciones')),
+  ],
+  rows: _shipments.map((shipment) {
+    return DataRow(
+      cells: [
+        // Cell 1: ID
+        DataCell(
+          Text(
+            shipment['id'] ?? '',
+            style: TextStyle(fontSize: 12),
+          ),
+        ),
+        // Cell 2: Tracking
+        DataCell(
+          Container(
+            child: Tooltip(
+              message: shipment['numeroSeguimiento'] ?? 'Sin tracking',
+              child: SelectableText(
+                shipment['numeroSeguimiento'] ?? 'Sin tracking',
+                style: TextStyle(overflow: TextOverflow.ellipsis),
+              ),
+            ),
+          ),
+        ),
+        // Cell 3: Cliente
+        DataCell(
+          Text(
+            shipment['usuario']['nombre'] ?? 
+            shipment['nombreUsuario'] ?? 
+            'Usuario',
+          ),
+        ),
+        // Cell 4: Origen
+        DataCell(
+          Text(
+            shipment['origin'] ?? 
+            shipment['Origen'] ?? 
+            'Miami, FL',
+          ),
+        ),
+        // Cell 5: Destino
+        DataCell(
+          Text(
+            shipment['destination'] ?? 
+            shipment['direccion'] ?? 
+            'No disponible',
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        // Cell 6: Fecha (was missing)
+        DataCell(
+          Text(
+            _formatDate(
+              shipment['fecha'] ?? 
+              shipment['Fecha'] ?? 
+              DateTime.now()
+            ),
+          ),
+        ),
+        // Cell 7: Estado
+        DataCell(
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: _getStatusColor(
+                shipment['status'] ?? 
+                shipment['Estado'] ?? 
+                shipment['estado'] ?? 
+                'Procesando'
+              ),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              shipment['status'] ??
+              shipment['Estado'] ?? 
+              shipment['estado'] ?? 
+              'Procesando',
+              style: TextStyle(fontSize: 12),
+            ),
+          ),
+        ),
+        // Nueva celda 8: Botón de notificación de WhatsApp
+       // Nueva celda 8: Botón de notificación de WhatsApp
+        DataCell(
+          IconButton(
+            icon: Icon(Icons.chat, color: Color(0xFF25D366), size: 20),
+            tooltip: 'Notificar por WhatsApp',
+            onPressed: () {
+              _sendWhatsAppNotificationWithUserData(shipment);
+            },
+          ),
+        ),
+        // Cell 9: Acciones (administración)
+        DataCell(
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: Icon(Icons.visibility, size: 20),
+                onPressed: () {
+                  _showShipmentDetails(shipment);
+                },
+                tooltip: 'Ver detalles',
+              ),
+              PopupMenuButton<String>(
+                onSelected: (String value) {
+                  _updateShipmentStatus(shipment['id'], value);
+                },
+                itemBuilder: (BuildContext context) => [
+                  PopupMenuItem(
+                    value: 'Procesando',
+                    child: Text('Procesando'),
+                  ),
+                  PopupMenuItem(
+                    value: 'En bodega',
+                    child: Text('En bodega'),
+                  ),
+                  PopupMenuItem(
+                    value: 'En tránsito',
+                    child: Text('En tránsito Miami'),
+                  ),
+                  PopupMenuItem(
+                    value: 'En aduana',
+                    child: Text('En aduana Ecuador'),
+                  ),
+                  PopupMenuItem(
+                    value: 'En país destino',
+                    child: Text('En Ecuador'),
+                  ),
+                  PopupMenuItem(
+                    value: 'En ruta entrega',
+                    child: Text('En ruta entrega'),
+                  ),
+                  PopupMenuItem(
+                    value: 'Entregado',
+                    child: Text('Entregado'),
+                  ),
+                ],
+                icon: Icon(Icons.edit, size: 20),
+                tooltip: 'Cambiar estado',
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }).toList(),
+),
                     ),
           // Add pagination controls if you have them
         ],

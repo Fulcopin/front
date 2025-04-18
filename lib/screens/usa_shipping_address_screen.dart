@@ -4,18 +4,15 @@ import '../theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 class USAShippingAddressScreen extends StatefulWidget {
   const USAShippingAddressScreen({Key? key}) : super(key: key);
-
+  
   @override
   State<USAShippingAddressScreen> createState() => _USAShippingAddressScreenState();
 }
-
+ 
 class _USAShippingAddressScreenState extends State<USAShippingAddressScreen> {
-  final Map<String, String> _shippingData = {
-    'Nombre usuario': 'VACABOX',
-    'Dirección': '6951 NW 82nd Ave',
-    'Ciudad/Estado': 'Miami, Florida',
-    'Código postal': '33195-2881 United States',
-    'Celular': '9549143306',
+ 
+  
+ Map<String, String> _shippingData = {
   };
 
   Map<String, bool> _copiedStatus = {};
@@ -23,26 +20,69 @@ class _USAShippingAddressScreenState extends State<USAShippingAddressScreen> {
   @override
   void initState() {
     super.initState();
+    _initShippingData();
     // Inicializar el estado de copiado para cada campo
     for (var key in _shippingData.keys) {
       _copiedStatus[key] = false;
     }
      _loadUserData();
   }
- Future<void> _loadUserData() async {
+  Future<void> _initShippingData() async {
+     final prefs = await SharedPreferences.getInstance();
+      final userName = prefs.getString('name');
+      final userLastName = prefs.getString('apellido') ?? '';
+       final fullName = [userName, userLastName]
+      .where((part) => part != null && part.isNotEmpty) // Añadir verificación explícita
+      .join(' ');
+    _shippingData = {
+      'Nombre usuario': '$fullName / VACABOX',
+      'Dirección': '6951 NW 82nd Ave',
+      'Ciudad/Estado': 'Miami, Florida',
+      'Código postal': '33195-2881 United States',
+      'Celular': '9549143306',
+    };
+    
     try {
       final prefs = await SharedPreferences.getInstance();
-      final userName = prefs.getString('name') ?? '';
+      final userName = prefs.getString('name');
       
-      if (userName.isNotEmpty) {
+      if (userName != null && userName.isNotEmpty) {
         setState(() {
-          _shippingData['Nombre usuario'] = '$userName / VACABOX';
+          _shippingData['Nombre usuario'] = '$fullName / VACABOX';
         });
       }
     } catch (e) {
       print('Error loading user data: $e');
     }
   }
+ Future<void> _loadUserData() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    
+    // Debug: List all available keys in SharedPreferences
+    final keys = prefs.getKeys();
+    print('Available SharedPreferences keys: $keys');
+    
+    // Try to get user name
+    final userName = prefs.getString('name');
+    print('User name from SharedPreferences: $userName');
+    
+    if (userName != null && userName.isNotEmpty) {
+      setState(() {
+        _shippingData['Nombre usuario'] = '$userName / VACABOX';
+      });
+      print('Updated shipping name to: ${_shippingData['Nombre usuario']}');
+    } else {
+      print('User name is empty or null in SharedPreferences');
+      
+      // Check if user is logged in
+      final token = prefs.getString('token');
+      print('Token exists: ${token != null}');
+    }
+  } catch (e) {
+    print('Error loading user data: $e');
+  }
+}
   void _copyToClipboard(String key, String value) {
     Clipboard.setData(ClipboardData(text: value));
     

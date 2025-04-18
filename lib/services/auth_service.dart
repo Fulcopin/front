@@ -10,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class AuthService extends ChangeNotifier {
   User? _currentUser;
   bool _isLoading = false;
-  final String _baseUrl = 'https://proyect-currier.onrender.com'; // Update with your backend URL
+  final String _baseUrl = 'http://localhost:5000'; // Update with your backend URL
   //static const String CLIENT_SECRET_KEY = '2454619e5c46941ea1be0cebb2df67577070f3861a7f5df8dd8ca0c81deaf4fe';
   static const String ADMIN_SECRET_KEY = '22765924bc2a9a1485a2d9473399d9b6b3578e1f253baaf2ba81199982a57cf535dfecf487946efd51f85c613f6ac78882fe9b2246f4552058805da328682dbd'; 
   User? get currentUser => _currentUser;
@@ -119,6 +119,7 @@ Future<Map<String, dynamic>> login(String email, String password) async {
       final pais = responseData['pais']?.toString() ?? '';
       final userid = responseData['id']?.toString() ?? '';
       final nombre = responseData['nombre']?.toString() ?? '';
+      final apellido = responseData['apellido']?.toString() ?? '';
       final telefono = responseData['telefono']?.toString() ?? '';
       
           print('Dirección: $direccion');
@@ -131,6 +132,7 @@ Future<Map<String, dynamic>> login(String email, String password) async {
           await prefs.setString('idUser', userid);
           await prefs.setString('name', nombre);
           await prefs.setString('telefono', telefono);
+          await prefs.setString('apellido', apellido);
           final fullAddress = [direccion, ciudad, pais]
           .where((part) => part.isNotEmpty)
           .join(', ');
@@ -144,7 +146,7 @@ Future<Map<String, dynamic>> login(String email, String password) async {
       // Store token and role securely
       await _storage.write(key: 'token', value: token);
       await _storage.write(key: 'role', value: isAdmin ? 'ADMIN' : 'CLIENTE');
-      
+      await _storage.write(key: 'name', value: nombre);
       // Store user ID if available
       if (responseData['id'] != null) {
         await _storage.write(key: 'userId', value: responseData['id'].toString());

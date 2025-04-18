@@ -550,29 +550,47 @@ Widget _buildClientStatsGrid(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxWidth > 900) {
-          // Diseño de escritorio
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Expanded(
-                child: ClientQuickActions(),
-              ),
-              const SizedBox(width: 16),
-              const Expanded(
-                child: ClientShipmentsOverview(),
-              ),
-            ],
+  // Diseño de escritorio
+  return Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Expanded(
+        child: ClientQuickActions(),
+      ),
+      const SizedBox(width: 16),
+      Expanded(
+        child: ClientShipmentsOverview(
+          onShipmentTap: (shipmentId) {
+            // Navegar a la página de detalles del envío
+            Navigator.pushNamed(
+              context,
+              '/shipment-details',
+              arguments: {'id': shipmentId},
+            );
+          },
+        ),
+      ),
+    ],
+  );
+} else {
+  // Diseño móvil
+  return Column(
+    children: [
+      const ClientQuickActions(),
+      const SizedBox(height: 16),
+      ClientShipmentsOverview(
+        onShipmentTap: (shipmentId) {
+          // Navegar a la página de detalles del envío
+          Navigator.pushNamed(
+            context,
+            '/shipment-details',
+            arguments: {'id': shipmentId},
           );
-        } else {
-          // Diseño móvil
-          return Column(
-            children: const [
-              ClientQuickActions(),
-              SizedBox(height: 16),
-              ClientShipmentsOverview(),
-            ],
-          );
-        }
+        },
+      ),
+    ],
+  );
+}
       },
     );
   }

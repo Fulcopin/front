@@ -526,7 +526,7 @@ Future<void> _loadProducts() async {
         onPressed: _navigateToAddProduct,
         backgroundColor: AppTheme.primaryColor,
         icon: const Icon(Icons.add),
-        label: const Text('NUEVO PRODUCTO'),
+        label: const Text('NUEVO ALERTA'),
       ),
     );
   }
@@ -883,41 +883,20 @@ Widget _buildProductPrice(Product product) {
                           Row(
                             children: [
                               Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: () {
-                                    // Acción para crear envío
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('Función de crear envío en desarrollo'),
-                                      ),
-                                    );
-                                  },
-                                  icon: const Icon(Icons.local_shipping),
-                                  label: const Text('CREAR ENVÍO'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: AppTheme.primaryColor,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
                                 child: ElevatedButton.icon(
                                   onPressed: () {
-                                    // Acción para editar producto
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('Función de editar en desarrollo'),
-                                      ),
-                                    );
+                                    Navigator.pushNamed(context, '/payments');
                                   },
-                                  icon: const Icon(Icons.edit),
-                                  label: const Text('EDITAR'),
+                                  icon: const Icon(Icons.send),
+                                  label: const Text('ENVIAR ALERTA'),
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: AppTheme.primaryColor,
                                     foregroundColor: Colors.white,
                                   ),
                                 ),
                               ),
+                              const SizedBox(width: 8),
+                              
                             ],
                           ),
                         ],

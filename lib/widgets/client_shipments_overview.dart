@@ -216,7 +216,7 @@ class _ClientShipmentsOverviewState extends State<ClientShipmentsOverview> {
                 label: Text('Ver todos mis envíos'),
                 onPressed: () {
                   // Navegar a la página de todos los envíos
-                  Navigator.pushNamed(context, '/shipments');
+                  Navigator.pushNamed(context, '/my-shipments');
                 },
                 style: OutlinedButton.styleFrom(
                   padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),

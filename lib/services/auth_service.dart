@@ -132,7 +132,7 @@ Future<Map<String, dynamic>> login(String email, String password) async {
           await prefs.setString('idUser', userid);
           await prefs.setString('name', nombre);
           await prefs.setString('telefono', telefono);
-          await prefs.setString('apellido', apellido);
+          await prefs.setString('apellido',apellido);
           final fullAddress = [direccion, ciudad, pais]
           .where((part) => part.isNotEmpty)
           .join(', ');

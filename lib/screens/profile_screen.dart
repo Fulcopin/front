@@ -145,11 +145,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.shopping_cart_outlined),
-              title: const Text('Mis Productos'),
+              leading: const Icon(Icons.notifications_outlined),
+              title: const Text('Mis Alertas'),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.pushReplacementNamed(context, '/products');
+              },
+            ),
+             ListTile(
+              leading: const Icon(Icons.local_shipping_outlined),
+              title: const Text('Mi Casillero'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushReplacementNamed(context, '/usa-shipping');
               },
             ),
             ListTile(

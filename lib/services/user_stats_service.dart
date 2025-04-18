@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 
 
 class UserStatsService {
-  final String baseUrl ="http://localhost:5000";
+  final String baseUrl ="https://api-mpxltf6i3a-uc.a.run.app";
 
 
   Future<Map<String, dynamic>> getUserStats(String token, String userId) async {

@@ -4,7 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 
 class UserService {
-  final String baseUrl = 'http://localhost:5000';
+  final String baseUrl = 'https://api-mpxltf6i3a-uc.a.run.app';
   final _storage = const FlutterSecureStorage();
    
 

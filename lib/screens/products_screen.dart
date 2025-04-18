@@ -365,6 +365,15 @@ Future<void> _loadProducts() async {
                 Navigator.pop(context);
               },
             ),
+            
+             ListTile(
+              leading: const Icon(Icons.local_shipping_outlined),
+              title: const Text('Mi Casillero'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.pushReplacementNamed(context, '/usa-shipping');
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.credit_card_outlined),
               title: const Text('Realizar Pago'),

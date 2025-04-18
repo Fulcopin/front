@@ -8,7 +8,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:math';
 import 'package:shared_preferences/shared_preferences.dart';
 class ProductService {
-  final String baseUrl = 'http://localhost:5000';
+  final String baseUrl = 'https://api-mpxltf6i3a-uc.a.run.app';
   final _storage = const FlutterSecureStorage();
   // Datos simulados para productos
   final List<Product> _mockProducts = [

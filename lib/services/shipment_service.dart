@@ -11,7 +11,7 @@ import './image_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:math';
 class ApiConfig {
-  static const String baseUrl = 'http://localhost:5000'; 
+  static const String baseUrl = 'https://api-mpxltf6i3a-uc.a.run.app'; 
 }
 class ShipmentService {
   final _storage = FlutterSecureStorage();
